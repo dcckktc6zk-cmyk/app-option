@@ -1,0 +1,31 @@
+{
+ "name": "아파트 옵션 관리",
+ "short_name": "옵션관리",
+ "lang": "ko",
+ "id": "./",
+ "description": "아파트 세대별 유상옵션 확인·비교 (데이터는 이 기기에만 저장)",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "orientation": "any",
+ "background_color": "#122D43",
+ "theme_color": "#122D43",
+ "icons": [
+  {
+   "src": "icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png"
+  },
+  {
+   "src": "icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png"
+  },
+  {
+   "src": "icon-maskable.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "maskable"
+  }
+ ]
+}

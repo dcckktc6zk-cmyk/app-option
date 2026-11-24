@@ -183,6 +183,15 @@ table.grid{border-collapse:separate;border-spacing:0;font-size:13px;min-width:10
 .drop{border:1.5px dashed var(--line);border-radius:8px;padding:22px 16px;text-align:center;color:var(--ink-2);background:var(--bg)}
 .drop.over{border-color:var(--accent);background:var(--accent-soft)}
 .oedit{border:1px solid var(--line-2);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.mparts{display:flex;flex-direction:column;gap:6px}
+.mpart{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid var(--line-2);border-radius:6px;padding:8px 10px;background:var(--surface)}
+.mpart.bad{border-color:#FCA5A5}
+.mpart .mpn{flex:none;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;background:var(--accent-soft);color:var(--accent)}
+.mpart .mpm{flex:1 1 220px;min-width:0}
+.mpart .mpf{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mpart .mps{font-size:12px;color:var(--ink-2);margin-top:1px}
+.mpart .mpb{flex:none;margin-left:auto}
+.btn.over{outline:2px dashed var(--accent);outline-offset:2px}
 .oedit .ch{display:flex;gap:6px;align-items:center}
 .oedit .ch input[type=text]{flex:1}
 .err{color:var(--danger)} .warn{color:var(--k2);background:transparent}
@@ -527,7 +536,7 @@ window.__maskDefault = true;   // 폰 분실 대비: 엑셀을 가져올 때 계
 try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(v => { if (window.__localInfo) window.__localInfo.persisted = v; }); } catch (e) {}
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 (() => {
-  const V = '1.3', B = '2026-11-24';
+  const V = '1.4', B = '2026-11-24';
   if (window.__localInfo) window.__localInfo.about = `앱 버전 ${V} (${B}) · 현장 업무 보조용 개인 제작 도구이며, 회사 공식 시스템이 아닙니다.`;
   try { const pv = localStorage.getItem('aptopt-ver'); if (pv && pv !== V) window.__startupNote = `새 버전(${V})으로 업데이트되었습니다. 저장된 데이터는 그대로입니다.`; localStorage.setItem('aptopt-ver', V); } catch (e) {}
   window.__welcomeHTML = () => `<div class="panel welcome"><div class="wl-logos"><img src="gs-logo.png" alt="GS건설"><i></i><img class="wl-xi" src="xi-navy.png" alt="Xi"></div>
@@ -1460,29 +1469,179 @@ function exportHist() {
 }
 
 /* ───────── import flow ───────── */
+// 파일 하나를 읽어 시트마다 자동 인식까지 마친 가져오기 상태를 돌려준다 (백업 .json은 여기로 오지 않음)
+async function parseImportFile(file) {
+  const buf = await file.arrayBuffer(); let sheets;
+  if (/\.(xlsx|xlsm)$/i.test(file.name)) sheets = await readXlsx(buf);
+  else if (/\.pdf$/i.test(file.name)) sheets = await readPdf(buf, file.name);
+  else if (/\.xls$/i.test(file.name)) throw new Error('구형 .xls 파일은 읽을 수 없습니다. 엑셀에서 .xlsx로 다시 저장해 주세요.');
+  else sheets = [readCsv(buf, file.name)];
+  const legend = findLegend(sheets); if (legend) sheets.forEach(sh => { if (sh.name !== legend.sheet) sh._legend = legend; });
+  const imp = {file: file.name, size: file.size, mtime: file.lastModified, sheets, si: 0, mask: !!window.__maskDefault, mode: null, addOpts: true, pname: file.name.replace(/\.[^.]+$/, '').slice(0, 60), pdf: /\.pdf$/i.test(file.name)};
+  let best = -1, bn = 0;
+  sheets.forEach((sh, i) => { try { const m = autoMap(sh); if (m) { const r = applyMap(sh, m); sh._auto = {m, r}; if (r.units.length > bn) { bn = r.units.length; best = i; } } } catch (e) {} });
+  if (best >= 0 && imp.pdf && sheets[best]._auto.r.options.some(o => /계약\s*(미)?체결|^옵션 [A-Z]+$/.test(o.name))) { imp.si = best; imp.mm = mmFrom(sheets[best]._auto.m); imp.mm.text = ''; imp.mmOpen = true; sheets.forEach(sh => delete sh._auto); best = -2; }
+  if (best >= 0) { imp.si = best; imp.res = sheets[best]._auto.r; imp.via = 'auto'; imp.mm = mmFrom(sheets[best]._auto.m); }
+  else if (best === -2) imp.err = 'PDF에서 표는 읽었지만, 여러 줄로 병합된 머리글을 옵션별로 묶지 못했습니다. ' + (S.sample ? '‘Claude로 구조 분석’이나 ' : '') + '아래 ‘열 직접 지정’을 사용해 주세요.';
+  else { imp.err = '표 구조를 자동으로 찾지 못했습니다. 동·호(또는 호실) 열이 있는 시트인지 확인하거나 아래 ‘열 직접 지정’을 사용해 주세요.'; imp.mm = mmFrom(null); imp.mmOpen = true; }
+  return imp;
+}
 async function loadImport(file) {
   S.mg.imp = {file: file.name, busy: '파일을 읽는 중입니다…'}; render();
   try {
-    const buf = await file.arrayBuffer(); let sheets;
-    if (/\.json$/i.test(file.name)) { let j; try { j = JSON.parse(new TextDecoder().decode(buf)); } catch (e) { throw new Error('백업 파일을 읽지 못했습니다.'); } await importBackup(j); return; }
-    if (/\.(xlsx|xlsm)$/i.test(file.name)) sheets = await readXlsx(buf);
-    else if (/\.pdf$/i.test(file.name)) sheets = await readPdf(buf, file.name);
-    else if (/\.xls$/i.test(file.name)) throw new Error('구형 .xls 파일은 읽을 수 없습니다. 엑셀에서 .xlsx로 다시 저장해 주세요.');
-    else sheets = [readCsv(buf, file.name)];
-    const legend = findLegend(sheets); if (legend) sheets.forEach(sh => { if (sh.name !== legend.sheet) sh._legend = legend; });
-    const imp = {file: file.name, sheets, si: 0, mask: !!window.__maskDefault, mode: null, addOpts: true, pname: file.name.replace(/\.[^.]+$/, '').slice(0, 60), pdf: /\.pdf$/i.test(file.name)};
-    let best = -1, bn = 0;
-    sheets.forEach((sh, i) => { try { const m = autoMap(sh); if (m) { const r = applyMap(sh, m); sh._auto = {m, r}; if (r.units.length > bn) { bn = r.units.length; best = i; } } } catch (e) {} });
-    if (best >= 0 && imp.pdf && sheets[best]._auto.r.options.some(o => /계약\s*(미)?체결|^옵션 [A-Z]+$/.test(o.name))) { imp.si = best; imp.mm = mmFrom(sheets[best]._auto.m); imp.mm.text = ''; imp.mmOpen = true; sheets.forEach(sh => delete sh._auto); best = -2; }
-    if (best >= 0) { imp.si = best; imp.res = sheets[best]._auto.r; imp.via = 'auto'; imp.mm = mmFrom(sheets[best]._auto.m); }
-    else if (best === -2) imp.err = 'PDF에서 표는 읽었지만, 여러 줄로 병합된 머리글을 옵션별로 묶지 못했습니다. ' + (S.sample ? '‘Claude로 구조 분석’이나 ' : '') + '아래 ‘열 직접 지정’을 사용해 주세요.';
-    else { imp.err = '표 구조를 자동으로 찾지 못했습니다. 동·호(또는 호실) 열이 있는 시트인지 확인하거나 아래 ‘열 직접 지정’을 사용해 주세요.'; imp.mm = mmFrom(null); imp.mmOpen = true; }
-    S.mg.imp = imp;
+    if (/\.json$/i.test(file.name)) { const buf = await file.arrayBuffer(); let j; try { j = JSON.parse(new TextDecoder().decode(buf)); } catch (e) { throw new Error('백업 파일을 읽지 못했습니다.'); } await importBackup(j); return; }
+    S.mg.imp = await parseImportFile(file);
   } catch (e) { S.mg.imp = {file: file.name, fatal: (e && e.message) || '파일을 읽지 못했습니다.'}; }
   render();
 }
+
+/* ── 나뉜 파일(또는 시트) 여러 개를 한 단지로 합치기 ──
+   같은 동·호는 한 세대로, 이름이 같은 옵션은 한 항목으로 묶는다. 같은 칸의 값이 서로 다르면 아래쪽(나중) 파일을 따른다. */
+const IMP_ACCEPT = '.xlsx,.xlsm,.csv,.tsv,.txt,.pdf';
+const impNow = () => { const i = S.mg.imp; return i && i.multi && i.focus != null && i.parts[i.focus] ? i.parts[i.focus] : i; };
+const partOK = p => !!(p && p.res && p.res.units.length);
+const newShell = base => ({multi: true, parts: [], focus: null, mask: base ? !!base.mask : !!window.__maskDefault, mode: base && base.modeSet ? base.mode : null, modeSet: !!(base && base.modeSet), addOpts: base ? base.addOpts !== false : true, pnameAuto: !(base && base.pnameAuto === false), pname: (base && base.pname) || ''});
+async function loadImports(files, base) {
+  files = [...files].filter(Boolean); if (!files.length) return;
+  if (!base && files.length === 1) return loadImport(files[0]);
+  const shell = base && base.multi ? base : newShell(base);
+  if (base && !base.multi && base.sheets) shell.parts.push(base);
+  const skipped = [], todo = [];
+  files.forEach(f => {
+    if (/\.json$/i.test(f.name)) { skipped.push(`${f.name} — 백업 파일은 따로 하나씩 복원하세요`); return; }
+    const dup = shell.parts.find(p => (p.base || p.file) === f.name && p.size === f.size);   // 이름·크기가 같으면 같은 파일
+    if (dup && !dup.fatal) { skipped.push(`${f.name} — 이미 추가한 파일`); return; }
+    if (dup) shell.parts.splice(shell.parts.indexOf(dup), 1);
+    todo.push(f);
+  });
+  shell.focus = null; S.mg.imp = shell;
+  for (let i = 0; i < todo.length; i++) {
+    shell.busy = `파일을 읽는 중입니다… ${todo.length > 1 ? `(${i + 1}/${todo.length}) ` : ''}${todo[i].name}`; render();
+    let p; try { p = await parseImportFile(todo[i]); } catch (e) { p = {file: todo[i].name, size: todo[i].size, mtime: todo[i].lastModified, fatal: (e && e.message) || '파일을 읽지 못했습니다.'}; }
+    if (S.mg.imp !== shell) return;   // 그 사이 '처음부터'를 눌렀음
+    shell.parts.push(p);
+  }
+  shell.busy = ''; shell.skipped = skipped;
+  if (shell.parts.length <= 1) { const one = toSingle(shell); S.mg.imp = one || {file: files[0].name, fatal: skipped.join(' / ') || '가져올 파일이 없습니다.'}; if (one && skipped.length) toast(skipped.join(' / ')); render(); return; }
+  remerge(shell); render();
+}
+function toSingle(imp) {
+  const p = imp.parts[0]; if (!p) return null;
+  if (p.fatal) return {file: p.file, fatal: p.fatal};
+  if (p.base) { p.file = p.base; delete p.base; }
+  return Object.assign(p, {mask: !!imp.mask, mode: imp.modeSet ? imp.mode : null, modeSet: !!imp.modeSet, addOpts: imp.addOpts !== false, pnameAuto: imp.pnameAuto, pname: imp.pnameAuto === false ? imp.pname : p.file.replace(/\.[^.]+$/, '').slice(0, 60), busy: '', shOpen: false, shSel: null});
+}
+// 한 파일 안의 시트 여러 장을 각각 합칠 조각으로
+function sheetParts(p, idx) {
+  const base = p.base || p.file;
+  return idx.map(i => { const sh = p.sheets[i], cur = i === p.si && p.res; return Object.assign({}, p, {file: base + ' › ' + sh.name, base, si: i, res: cur ? p.res : sh._auto.r, via: cur ? p.via : 'auto', mm: cur ? p.mm : mmFrom(sh._auto.m), err: '', mmOpen: false, busy: '', shOpen: false, shSel: null}); });
+}
+function commonName(names) {
+  const b = names.filter(Boolean).map(n => n.replace(/\.[^.]+$/, ''));
+  if (!b.length) return '새 단지';
+  let pre = b[0];
+  for (const x of b.slice(1)) { let i = 0; while (i < pre.length && i < x.length && pre[i] === x[i]) i++; pre = pre.slice(0, i); }
+  const sep = /[\s_\-–—·.,(\[{~+]+$/;
+  if (b.length > 1) { pre = pre.replace(/\d+$/, '').replace(sep, '').trim(); const w = pre.replace(/(형별\s*)?(유상\s*)?(옵션\s*)?(계약\s*내역|계약\s*현황|내역|현황|자료|파일|옵션)$/, '').replace(sep, '').trim(); if (w.length >= 2) pre = w; }   // '상인센트럴자이_옵션' → '상인센트럴자이'
+  return (pre.length >= 2 ? pre : b[0]).slice(0, 60);
+}
+function partsLabel(ps) {
+  const out = [];
+  ps.forEach(p => { if (!p.base) { out.push({f: p.file}); return; } const g = out.find(x => x.f === p.base && x.sh); if (g) g.sh.push(p.sheets[p.si].name); else out.push({f: p.base, sh: [p.sheets[p.si].name]}); });
+  return out.map(x => x.sh ? `${x.f} (${x.sh.join(', ')})` : x.f).join(' + ');
+}
+function remerge(imp) {
+  const ok = imp.parts.filter(partOK);
+  imp.res = ok.length ? mergeResults(ok) : null;
+  if (imp.res) { const ix = ok.map(p => imp.parts.indexOf(p)), M = imp.res.merged; for (const k in M.src) M.src[k] = M.src[k].map(i => ix[i]); M.conflicts.forEach(c => { c.ai = ix[c.ai]; c.bi = ix[c.bi]; }); }   // 화면의 파일 번호로
+  imp.file = partsLabel(ok);
+  imp.pdf = ok.some(p => p.pdf);
+  if (imp.pnameAuto !== false) imp.pname = commonName(imp.parts.map(p => p.base || p.file));
+  if (!imp.modeSet) imp.mode = null;
+}
+// 동 열이 없는 파일: 시트·파일 이름에 동 번호가 하나만 적혀 있으면 그 동으로 (101~105동 같은 범위는 쓰지 않음)
+function inferDong(p) {
+  const sh = p.sheets && p.sheets[p.si];
+  for (const s of [sh && sh.name, (p.base || p.file || '').replace(/\.[^.]+$/, '')]) {
+    const t = String(s || ''); if (/\d\s*[~∼\-–]\s*\d{2,4}\s*동/.test(t)) continue;
+    const ms = [...new Set([...t.matchAll(/(\d{2,4})\s*동/g)].map(m => String(parseInt(m[1], 10))))];
+    if (ms.length === 1) return ms[0];
+  }
+  return '';
+}
+function inferType(p) {
+  const sh = p.sheets && p.sheets[p.si], m = norm(sh && sh.name).match(/^(?:type\s*)?(\d{2,3}(?:\.\d+)?[A-Za-z]{0,2})\s*(?:타입|형|type)?$/i);
+  return m ? m[1].toUpperCase() : '';
+}
+function mergeResults(parts) {
+  const options = [], flags = [], fmap = new Map(), units = [], umap = new Map(), conflicts = [], notes = [], alerts = [], warn = [], keysets = [];
+  const flagCol = parts.some(p => p.res.flags.length) && parts.every(p => !p.res.flags.length || p.res.flagCol);
+  let on = 0, sum = 0, blind = 0;
+  parts.forEach((p, pi) => {
+    const res = p.res, om = {}, lab = p.file, ks = new Set(); keysets.push(ks);
+    res.options.forEach(po => {
+      let o = options.find(x => !x._pi.has(pi) && nk(x.name) === nk(po.name));
+      if (!o) { o = {id: 'o' + (++on), name: po.name, choices: [], _pi: new Set()}; options.push(o); }
+      o._pi.add(pi);
+      const cmap = {};
+      po.choices.forEach(pc => {
+        let c = o.choices.find(x => nk(x.name) === nk(pc.name));
+        if (!c) { c = {id: 'c' + (o.choices.length + 1), name: pc.name}; if (pc.b && !o.choices.some(x => x.b)) c.b = 1; o.choices.push(c); }
+        cmap[pc.id] = c.id;
+      });
+      om[po.id] = {o, cmap};
+    });
+    let dFix = '', tFix = '';
+    if (parts.length > 1 && res.units.every(u => u.d === '본동')) { dFix = inferDong(p); if (dFix) notes.push(`${lab}: 동 열이 없어 이름에 적힌 ${dFix}동으로 넣었습니다.`); else blind++; }
+    if (parts.length > 1 && res.units.every(u => !u.t)) { tFix = inferType(p); if (tFix) notes.push(`${lab}: 타입 열이 없어 시트 이름의 ${tFix}을(를) 타입으로 넣었습니다.`); }
+    res.units.forEach(pu => {
+      sum++;
+      const d = dFix || pu.d, k = d + '-' + pu.h; let u = umap.get(k); ks.add(k);
+      if (!u) { u = {d, h: pu.h, s: {}, _src: {}, _n: 0}; umap.set(k, u); units.push(u); }
+      u._n++;
+      const take = (f, v, name) => {
+        if (!v) return;
+        const old = u[f], tk = x => nk(x).replace(/^type/, '').replace(/(타입|형|type)$/, '').replace(/^0+(?=\d)/, '');
+        if (old && f === 't' && tk(old) === tk(v)) return;   // 84A · 84A타입 · 084A는 같은 타입
+        if (old && nk(old) !== nk(v)) {
+          if (f === 'n' && (maskName(v) === old || maskName(old) === v)) { if (old.includes('*')) { u[f] = v; u._src[f] = pi; } return; }   // 가린 이름과 원래 이름은 같은 사람
+          conflicts.push({key: k, lab: name, a: old, ai: u._src[f], b: v, bi: pi});
+        }
+        u[f] = v; u._src[f] = pi;
+      };
+      take('t', pu.t || tFix, '타입'); take('n', pu.n, '계약자');
+      if (pu.cd && (!u.cd || pu.cd < u.cd)) u.cd = pu.cd;   // 계약일: 가장 이른 날짜
+      if (pu.od && (!u.od || pu.od > u.od)) u.od = pu.od;   // 옵션계약일: 가장 최근 날짜
+      if (pu.m && !(u.m || '').split(' / ').includes(pu.m)) u.m = u.m ? u.m + ' / ' + pu.m : pu.m;
+      if (pu.c != null) { if (u.c == null) u.c = pu.c; else if (u.c !== pu.c) { u.c = 1; u._mc = 1; } }   // 한 파일이라도 체결이면 체결
+      if (pu.f) { const pf = res.flags.find(x => x.id === pu.f); if (pf) { const fk = flagCol || res.flagCol ? 'L:' + nk(pf.label) : 'C:' + colorKey(pf.color); let f = fmap.get(fk); if (!f) { f = {id: 'f' + (flags.length + 1), color: pf.color, label: pf.label}; fmap.set(fk, f); flags.push(f); } u.f = f.id; } }
+      for (const [poid, pcid] of Object.entries(pu.s || {})) {
+        const r = om[poid], mc = r && r.cmap[pcid]; if (!mc) continue;
+        const cur = u.s[r.o.id];
+        if (cur != null && cur !== mc) conflicts.push({key: k, lab: r.o.name, a: chName(r.o, cur), ai: u._src[r.o.id], b: chName(r.o, mc), bi: pi});
+        u.s[r.o.id] = mc; u._src[r.o.id] = pi;
+        if (u.p && u.p[r.o.id] && !(pu.p && pu.p[poid] != null)) delete u.p[r.o.id];   // 이전 선택은 지금 값을 준 파일 것만
+      }
+      for (const [poid, pcid] of Object.entries(pu.p || {})) { const r = om[poid], mc = r && r.cmap[pcid]; if (mc) (u.p || (u.p = {}))[r.o.id] = mc; }
+    });
+    res.warn.forEach(w => { if (!(dFix && /^동 열이 없어/.test(w))) warn.push(`${lab}: ${w}`); });
+  });
+  let overlap = 0, mixed = 0;
+  units.forEach(u => { if (u._n > 1) overlap++; if (u._mc) mixed++; delete u._n; delete u._mc; delete u._src; if (u.p && !Object.keys(u.p).length) delete u.p; });
+  const src = {}, shared = [];
+  options.forEach(o => { if (o.choices.length && !o.choices.some(c => c.b)) o.choices[0].b = 1; src[o.id] = [...o._pi]; if (o._pi.size > 1) shared.push(o.name); delete o._pi; });
+  if (blind > 1) alerts.push(`동 열도, 이름에 적힌 동 번호도 없는 파일이 ${blind}개입니다. 서로 다른 동의 자료라면 같은 호수가 한 세대로 합쳐졌으니, 파일에 동 열을 넣거나 파일 이름에 ‘101동’처럼 동 번호를 적어 다시 올려 주세요.`);
+  for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {   // 같은 자료를 두 번 올린 경우
+    const A = parts[i].res, B = parts[j].res, both = [...keysets[j]].filter(k => keysets[i].has(k)).length, na = new Set(A.options.map(o => nk(o.name))), ob = B.options.filter(o => na.has(nk(o.name))).length;
+    const small = Math.min(keysets[i].size, keysets[j].size), big = Math.max(keysets[i].size, keysets[j].size);
+    if (both < 0.9 * small || ob < 0.9 * Math.min(A.options.length, B.options.length)) continue;
+    if (both >= 0.9 * big) alerts.push(`‘${parts[i].file}’과 ‘${parts[j].file}’은 세대와 옵션이 거의 같습니다. 같은 자료를 두 번 올리지 않았는지 확인하세요. 날짜만 다른 같은 자료라면 합치지 말고, 나중 자료를 따로 올려 ‘바뀐 내용만 반영’으로 하는 것이 맞습니다.`);
+    else { const [s, l] = keysets[i].size < keysets[j].size ? [parts[i], parts[j]] : [parts[j], parts[i]]; notes.push(`‘${s.file}’의 세대는 거의 모두 ‘${l.file}’에도 있습니다 (전체 자료와 일부 자료를 함께 고른 경우). 값이 서로 다른 곳이 있으면 위에 따로 표시됩니다.`); }
+  }
+  return {options, flags, units, warn, flagCol, merged: {sum, overlap, mixed, shared, src, conflicts, notes, alerts}};
+}
 async function runClaude() {
-  const imp = S.mg.imp; if (!imp || !imp.sheets || !S.sample) return;
+  const top = S.mg.imp, imp = impNow(); if (!imp || !imp.sheets || !S.sample) return;
   imp.busy = 'Claude가 표 구조를 읽고 있습니다…'; imp.err = ''; render();
   try {
     const {si, map} = await claudeMap(imp.sheets), res = applyMap(imp.sheets[si], map);
@@ -1492,7 +1651,7 @@ async function runClaude() {
     const c = e && e.code;
     imp.err = c === 'not_granted' ? 'Claude 사용이 허용되지 않아 분석하지 못했습니다.' : c === 'rate_limited' ? '사용량 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요.' : c === 'empty' ? 'Claude가 찾은 구조로는 세대를 읽지 못했습니다. 다른 시트나 파일로 시도해 주세요.' : 'Claude 분석에 실패했습니다. 다시 시도해 주세요.';
   }
-  imp.busy = ''; render();
+  imp.busy = ''; if (top && top.multi && S.mg.imp === top) remerge(top); render();
 }
 function putUnits(list) {
   const by = new Map(); list.forEach(u => { if (!by.has(u.d)) by.set(u.d, []); by.get(u.d).push(u); });
@@ -1553,7 +1712,7 @@ function mmFrom(map) {
     text: (map.options || []).map(o => o.kind !== 'mark' ? o.name + ': ' + L0(o.col) : o.name + ': ' + o.choices.map(x => L0(x.col) + '=' + x.name + (x.unc ? '*' : '')).join(' | ')).join('\n')};
 }
 function runManual() {
-  const imp = S.mg.imp, mm = imp.mm, sh = imp.sheets[imp.si], col = v => { const i = colIndex(v || ''); return i >= 0 ? i : undefined; };
+  const imp = impNow(), mm = imp.mm, sh = imp.sheets[imp.si], col = v => { const i = colIndex(v || ''); return i >= 0 ? i : undefined; };
   const cols = Object.assign({}, mm._c || {}, {dong: col(mm.dong), ho: col(mm.ho), dongho: col(mm.dongho), type: col(mm.type), name: col(mm.name)});
   Object.keys(cols).forEach(k => { if (cols[k] == null) delete cols[k]; });
   imp.err = '';
@@ -1573,6 +1732,7 @@ function runManual() {
   const res = applyMap(sh, {dataStart: start - 1, cols, options});
   if (!res.units.length) { imp.err = '이 설정으로는 세대를 읽지 못했습니다. 행 번호와 동·호 열을 확인해 주세요.'; return; }
   imp.res = res; imp.via = 'manual';
+  if (S.mg.imp.multi) remerge(S.mg.imp);
 }
 /* ── 새로 받은 자료와 현재 단지 대조 ── */
 const nk = s => norm(s).replace(/\s/g, '').toLowerCase();
@@ -1630,7 +1790,12 @@ function diffView(df, imp) {
   df.added.forEach(nu => rows.push([nu.d + '-' + nu.h, '세대', '', '새로 추가']));
   const nCh = rows.length - df.added.length;
   let h = `<div class="diffbox"><div class="label">현재 단지와 비교한 결과</div><div class="dsums"><span class="pill ${nCh ? 'k2' : 'k0'} num">바뀐 항목 ${fmt(nCh)}건 · ${fmt(nUnits)}세대</span><span class="pill ${df.added.length ? 'k1' : 'k0'} num">새 세대 ${fmt(df.added.length)}</span><span class="pill k0 num">새 자료에 없는 세대 ${fmt(df.missing.length)} · 그대로 둠</span>${df.newCh.length ? `<span class="pill k3 num">새 선택지 ${df.newCh.length}</span>` : ''}${df.newOpts.length ? `<span class="pill k4 num">새 옵션 ${df.newOpts.length}</span>` : ''}</div>`;
-  if (df.matchRate < 0.5) h += `<p class="err">옵션 이름이 현재 단지와 거의 맞지 않습니다(${Math.round(df.matchRate * 100)}% 일치). 다른 단지의 자료가 아닌지 확인해 주세요.</p>`;
+  if (df.matchRate < 0.5) {
+    const nNew = df.changes.reduce((s, c) => s + c.items.filter(it => it.kind === 'newopt').length, 0);
+    // 세대는 거의 같고 옵션만 다르면: 같은 단지의 다른 옵션 파일(2차 옵션 등)일 가능성이 큼
+    if (overlapRatio(imp.res) >= 0.5 && df.newOpts.length) h += `<p class="hint" style="color:var(--ink-2)">세대는 현재 단지와 같은데 옵션 이름은 겹치지 않습니다(${Math.round(df.matchRate * 100)}% 일치). <b>같은 단지의 다른 옵션 파일이면 그대로 반영하세요</b> — 새 옵션 ${df.newOpts.length}개와 세대별 값 ${fmt(nNew)}건이 추가됩니다. 다른 단지 자료라면 위에서 ‘새 단지로 추가’를 고르세요.</p>`;
+    else h += `<p class="err">옵션 이름이 현재 단지와 거의 맞지 않습니다(${Math.round(df.matchRate * 100)}% 일치). 다른 단지의 자료가 아닌지 확인해 주세요.</p>`;
+  }
   { const {map} = units(), conf = [];
     df.changes.forEach(ch => { const u = map.get(ch.key); if (!u || !u.w) return; ch.items.forEach(it => { if (it.kind !== 'opt' || !it.oid) return; const o = opts().find(x => x.id === it.oid); if (o && wStat(u, o) === 'done') conf.push(`${ch.key} ${shortName(o.name)}: ${it.fromName} → ${it.toName}`); }); });
     if (conf.length) h += `<div class="warnbox"><b>이미 시공 완료한 세대의 옵션 ${fmt(conf.length)}건이 바뀝니다.</b> 반영하면 '재시공 확인 필요'(빨간색)로 바뀌어 세대별 → 시공 체크와 현황에 표시됩니다.<ul>${conf.slice(0, 50).map(x => `<li>${esc(x)}</li>`).join('')}${conf.length > 50 ? `<li>…외 ${conf.length - 50}건</li>` : ''}</ul></div>`; }
@@ -1688,7 +1853,8 @@ function applyDiff() {
         const tgt = r.cmap[ch.nu.s[it.noid]]; if (!tgt) return;
         const old = sel(u, r.o); if (old === tgt) return;
         touch(u._c);
-        if (fresh) { u.s = u.s || {}; u.s[r.o.id] = tgt; const pv = ch.nu.p && r.cmap[ch.nu.p[it.noid]]; if (pv && pv !== tgt) (u.p || (u.p = {}))[r.o.id] = pv; } else setSel(u, r.o, tgt);
+        // 처음 들어오는 값(미체결→체결, 또는 이 단지에 아직 값이 없던 옵션)은 파일에 적힌 '변경 전 선택'을 그대로 가져옴
+        if (fresh || old == null) { u.s = u.s || {}; u.s[r.o.id] = tgt; const pv = ch.nu.p && r.cmap[ch.nu.p[it.noid]]; if (pv && pv !== tgt) (u.p || (u.p = {}))[r.o.id] = pv; } else setSel(u, r.o, tgt);
         items.push([ch.key, r.o.name, old ? chName(r.o, old) : '', chName(r.o, tgt)]); nItems++;
       });
     });
@@ -2018,51 +2184,105 @@ function vCompare() {
   h += `</section>`;
   return h;
 }
-function vImport() {
-  const imp = S.mg.imp;
-  let h = `<section class="panel"><div class="panel-h"><h2>파일에서 가져오기</h2></div><div class="panel-b steps">`;
-  if (!imp || imp.fatal) {
-    h += `<div class="drop" id="drop"><p><b>옵션 계약 내역 파일</b>을 여기에 끌어다 놓거나</p><p style="margin:10px 0"><label class="btn pri" for="impFile">파일 선택</label><input class="sr" type="file" id="impFile" accept=".xlsx,.xlsm,.csv,.tsv,.txt,.pdf,.json"></p><p class="faint" style="font-size:12px">Excel(.xlsx) · CSV · PDF. 동·호 열과 옵션별 표시(1, O, ✓ 또는 선택값)가 있는 세대 목록이면 옵션 항목까지 자동으로 구성됩니다. 이 사이트에서 저장한 백업(.json)도 여기로 복원합니다.</p></div>`;
-    if (imp && imp.fatal) h += `<p class="err">${esc(imp.file)}: ${esc(imp.fatal)}</p>`;
-    return h + `</div></section>`;
+function impOptTable(res, src) {
+  const cnt = {}; res.units.forEach(u => { for (const k in u.s) { const kk = k + '|' + u.s[k]; cnt[kk] = (cnt[kk] || 0) + 1; } });
+  return `<div class="scroll-x" style="max-height:260px;overflow-y:auto;border:1px solid var(--line-2);border-radius:6px"><table class="grid"><thead><tr><th class="stick">옵션 항목</th><th style="max-width:none;text-align:left">선택지 (세대 수)</th></tr></thead><tbody>${res.options.map(o => `<tr><th class="stick" style="white-space:normal;min-width:120px">${esc(o.name)}${src && src[o.id] ? `<div class="faint" style="font-weight:400;font-size:11px">파일 ${src[o.id].map(i => i + 1).join('·')}</div>` : ''}</th><td style="text-align:left">${o.choices.map(c => `<span class="pill k${kOf(o, c.id)}" style="margin:1px 2px">${esc(c.name)} ${cnt[o.id + '|' + c.id] || 0}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`;
+}
+const impWarnHTML = (warn, n) => warn.length ? `<ul class="muted" style="margin:0;padding-left:18px;font-size:12px">${warn.slice(0, n).map(w => `<li>${esc(w)}</li>`).join('')}${warn.length > n ? `<li>외 ${warn.length - n}건</li>` : ''}</ul>` : '';
+// 파일 하나(또는 합치기 중인 파일 하나)의 인식 화면: 시트 · Claude 분석 · 열 직접 지정 · 인식 결과
+function impEditHTML(p, inMulti) {
+  let h = `<div class="row">${inMulti ? `<button class="btn sm" data-act="imp-part-back">← 합친 결과로</button>` : ''}<span class="tag" style="max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.file)}</span>${p.sheets.length > 1 && !p.base ? `<label class="field">시트<select id="impSheet" data-ch="imp-sheet">${p.sheets.map((s, i) => `<option value="${i}"${i === p.si ? ' selected' : ''}>${esc(s.name)}${s._auto ? ' — ' + fmt(s._auto.r.units.length) + '세대' : ''}</option>`).join('')}</select></label>` : ''}<span class="sp" style="margin-left:auto"></span>${inMulti ? '' : `<label class="btn sm img-add" id="dropMore" title="1차·2차, 동별처럼 나뉜 파일을 한 단지로 합칩니다">파일 더 합치기<input type="file" multiple accept="${IMP_ACCEPT}" data-ch="imp-more" aria-label="합칠 파일 더 선택"></label><button class="btn sm" data-act="imp-cancel">다른 파일</button>`}</div>`;
+  const cand = p.base ? [] : p.sheets.map((s, i) => i).filter(i => i === p.si ? partOK(p) : !!(p.sheets[i]._auto && p.sheets[i]._auto.r.units.length));
+  if (cand.length > 1) {
+    h += `<div class="row"><button class="btn sm" data-act="imp-sh-toggle" aria-expanded="${!!p.shOpen}">${p.shOpen ? '시트 합치기 닫기' : `다른 시트도 합치기 (세대 목록 시트 ${cand.length}개)`}</button><span class="muted" style="font-size:12px;flex:1 1 220px">동·타입·옵션별로 시트가 나뉘어 있으면 골라서 한 단지로 합칩니다.</span></div>`;
+    if (p.shOpen) {
+      const sel = new Set(p.shSel || []);
+      h += `<div class="oedit">${cand.map(i => `<label class="row"><input type="checkbox" id="shs${i}" data-ch="imp-shsel" value="${i}"${i === p.si || sel.has(i) ? ' checked' : ''}${i === p.si ? ' disabled' : ''}> ${esc(p.sheets[i].name)} <span class="muted num" style="font-size:12px">${fmt((i === p.si ? p.res : p.sheets[i]._auto.r).units.length)}세대</span>${i === p.si ? '<span class="faint" style="font-size:12px">지금 시트</span>' : ''}</label>`).join('')}
+        <div class="row"><button class="btn sm pri" data-act="imp-sheets-merge"${sel.size ? '' : ' disabled'}>${sel.size ? `지금 시트와 함께 ${sel.size + 1}개 합치기` : '합칠 시트를 고르세요'}</button><span class="hint">‘전체’ 시트와 동별 시트를 함께 고르면 세대가 겹칩니다. 겹친 세대는 하나로 합치지만, 원본·수정본처럼 내용이 다른 시트는 함께 고르지 마세요.</span></div></div>`;
+    }
   }
-  if (imp.busy && !imp.sheets) return h + `<p class="muted">${esc(imp.busy)}</p></div></section>`;
-  const res = imp.res;
-  h += `<div class="row"><span class="tag">${esc(imp.file)}</span>${imp.sheets.length > 1 ? `<label class="field">시트<select id="impSheet" data-ch="imp-sheet">${imp.sheets.map((s, i) => `<option value="${i}"${i === imp.si ? ' selected' : ''}>${esc(s.name)}${s._auto ? ' — ' + fmt(s._auto.r.units.length) + '세대' : ''}</option>`).join('')}</select></label>` : ''}<span class="sp" style="margin-left:auto"></span><button class="btn sm" data-act="imp-cancel">다른 파일</button></div>`;
-  if (!window.__standalone) h += `<div class="row"><button class="btn sm" data-act="imp-claude"${S.sample && !imp.busy ? '' : ' disabled'}>Claude로 구조 분석</button><span class="muted" style="font-size:12px;flex:1 1 220px">${imp.busy ? esc(imp.busy) : S.sample ? '표 모양이 달라 자동 인식이 틀렸을 때 사용하세요. 머리글과 일부 행을 Claude에게 보내 열 구성을 읽습니다.' : '이 화면에서는 Claude 분석을 사용할 수 없습니다.'}</span></div>`;
-  const mm = imp.mm || (imp.mm = mmFrom(null));
-  h += `<div class="row"><button class="btn sm" data-act="imp-mm-toggle" aria-expanded="${!!imp.mmOpen}">열 직접 지정 ${imp.mmOpen ? '닫기' : '열기'}</button><span class="muted" style="font-size:12px;flex:1 1 220px">자동 인식이 틀렸을 때, 어느 열이 어떤 옵션인지 직접 적어 다시 읽습니다.</span></div>`;
-  if (imp.mmOpen) {
-    const sh = imp.sheets[imp.si], pv = fillMerges(sh, 12), W = Math.min(sh.rows.reduce((m, r) => Math.max(m, r.length), 0), 60), fi = (id, f, lab, w) => `<label class="field">${lab}<input id="${id}" data-ch="mm" data-f="${f}" value="${esc(mm[f])}" style="width:${w}px"></label>`;
+  if (!window.__standalone) h += `<div class="row"><button class="btn sm" data-act="imp-claude"${S.sample && !p.busy ? '' : ' disabled'}>Claude로 구조 분석</button><span class="muted" style="font-size:12px;flex:1 1 220px">${p.busy ? esc(p.busy) : S.sample ? '표 모양이 달라 자동 인식이 틀렸을 때 사용하세요. 머리글과 일부 행을 Claude에게 보내 열 구성을 읽습니다.' : '이 화면에서는 Claude 분석을 사용할 수 없습니다.'}</span></div>`;
+  const mm = p.mm || (p.mm = mmFrom(null));
+  h += `<div class="row"><button class="btn sm" data-act="imp-mm-toggle" aria-expanded="${!!p.mmOpen}">열 직접 지정 ${p.mmOpen ? '닫기' : '열기'}</button><span class="muted" style="font-size:12px;flex:1 1 220px">자동 인식이 틀렸을 때, 어느 열이 어떤 옵션인지 직접 적어 다시 읽습니다.</span></div>`;
+  if (p.mmOpen) {
+    const sh = p.sheets[p.si], pv = fillMerges(sh, 12), W = Math.min(sh.rows.reduce((m, r) => Math.max(m, r.length), 0), 60), fi = (id, f, lab, w) => `<label class="field">${lab}<input id="${id}" data-ch="mm" data-f="${f}" value="${esc(mm[f])}" style="width:${w}px"></label>`;
     h += `<div class="oedit"><div class="label">파일 앞부분 (열 알파벳 · 행 번호)</div><div class="scroll-x" data-scroll="mmpv" style="max-height:220px;overflow-y:auto"><table class="grid" style="font-size:11px"><thead><tr><th class="stick">행</th>${Array.from({length: W}, (_, c) => `<th style="min-width:0">${colLetter(c)}</th>`).join('')}</tr></thead><tbody>${pv.map((row, r) => `<tr><th class="stick">${r + 1}</th>${Array.from({length: W}, (_, c) => `<td style="padding:2px 6px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(norm(row[c]))}">${esc(norm(row[c]).slice(0, 20))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
       <div class="row">${fi('mmStart', 'start', '첫 세대 행 번호', 80)}${fi('mmDong', 'dong', '동 열', 56)}${fi('mmHo', 'ho', '호 열', 56)}${fi('mmDH', 'dongho', '동호 합친 열', 70)}${fi('mmType', 'type', '타입 열', 56)}${fi('mmName', 'name', '계약자 열', 56)}</div>
       <label class="field">옵션 (한 줄에 하나)<textarea class="inp" id="mmText" data-ch="mm" data-f="text" rows="7" style="font-family:var(--mono);font-size:12px;white-space:pre;overflow-x:auto" placeholder="쿡탑: U=가스쿡탑* | V=가스쿡탑 | W=하이브리드&#10;발코니 확장: H">${esc(mm.text)}</textarea></label>
       <p class="faint" style="font-size:12px">표시(1, O, ✓)로 고르는 옵션은 <b>옵션명: 열=선택지 | 열=선택지</b>, 칸에 선택값이 글자로 적힌 옵션은 <b>옵션명: 열</b>. 기본 사양을 맨 앞에 적고, 옵션계약 미체결 세대용 열은 선택지 뒤에 * 를 붙입니다.</p>
       <div class="row"><button class="btn sm pri" data-act="imp-manual">이 설정으로 다시 읽기</button></div></div>`;
   }
-  if (imp.pdf) h += `<p class="muted" style="font-size:12px">PDF는 글자 위치로 표를 복원하므로 열이 어긋날 수 있습니다. 아래 인식 결과를 꼭 확인하고, 가능하면 원본 Excel을 사용하세요.</p>`;
-  if (imp.err) h += `<p class="err">${esc(imp.err)}</p>`;
-  if (res) {
-    h += `<div><div class="label">인식 결과 · ${imp.via === 'claude' ? 'Claude 분석' : imp.via === 'manual' ? '직접 지정' : '자동 인식'}</div><p style="margin-top:2px"><b class="num">${fmt(res.units.length)}세대</b>, 옵션 <b class="num">${res.options.length}개</b>${res.flags.length ? `, 색상 표시 ${res.flags.length}종` : ''}</p></div>`;
-    h += `<div class="scroll-x" style="max-height:260px;overflow-y:auto;border:1px solid var(--line-2);border-radius:6px"><table class="grid"><thead><tr><th class="stick">옵션 항목</th><th style="max-width:none;text-align:left">선택지 (세대 수)</th></tr></thead><tbody>${res.options.map(o => `<tr><th class="stick" style="white-space:normal;min-width:120px">${esc(o.name)}</th><td style="text-align:left">${o.choices.map(c => `<span class="pill k${kOf(o, c.id)}" style="margin:1px 2px">${esc(c.name)} ${res.units.filter(u => u.s[o.id] === c.id).length}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`;
-    if (res.warn.length) h += `<ul class="muted" style="margin:0;padding-left:18px;font-size:12px">${res.warn.slice(0, 5).map(w => `<li>${esc(w)}</li>`).join('')}${res.warn.length > 5 ? `<li>외 ${res.warn.length - 5}건</li>` : ''}</ul>`;
-    const canUpd = !!(S.pid && meta() && units().list.length);
-    // 동·호가 겹쳐도 옵션 구성이 다르면 다른 단지로 보고 '새 단지로 추가'를 기본으로
-    if (!imp.mode || (imp.mode === 'update' && !canUpd)) imp.mode = canUpd && overlapRatio(res) >= 0.5 && optMatchRate(res) >= 0.5 ? 'update' : 'new';
-    h += `<div class="steps" style="gap:8px;border-top:1px solid var(--line-2);padding-top:12px"><div class="label">어떻게 가져올까요?</div>
-      ${canUpd ? `<label class="mrad"><input type="radio" name="impMode" id="impUpd" data-ch="imp-mode" value="update"${imp.mode === 'update' ? ' checked' : ''}><span><b>현재 단지(${esc(meta().name)})에 바뀐 내용만 반영</b><span class="hint">새로 받은 자료와 비교해서 달라진 세대만 고칩니다. 변경 이력에 남고 되돌릴 수 있습니다.</span></span></label>` : ''}
-      <label class="mrad"><input type="radio" name="impMode" id="impNew" data-ch="imp-mode" value="new"${imp.mode === 'new' ? ' checked' : ''}><span><b>새 단지로 추가</b></span></label>
-      ${S.pid ? `<label class="mrad"><input type="radio" name="impMode" id="impRep" data-ch="imp-mode" value="replace"${imp.mode === 'replace' ? ' checked' : ''}><span><b>현재 단지를 이 파일로 통째로 교체</b><span class="hint">옵션 구성과 세대가 모두 바뀌고 되돌릴 수 없습니다.</span></span></label>` : ''}</div>`;
-    if (imp.mode === 'update') {
-      const nm = namesMasked();
-      h += `<label class="row"><input type="checkbox" id="impMask" data-ch="imp-mask"${imp.mask || nm ? ' checked' : ''}${nm ? ' disabled' : ''}> 계약자명을 가려서 비교·저장${nm ? ' (지금 단지의 이름이 가려져 있어 자동으로 적용)' : ''}</label>`;
-      h += diffView(getDiff(imp), imp);
-    } else {
-      if (imp.mode === 'new') h += `<label class="field">단지 이름<input id="impName" data-ch="imp-name" value="${esc(imp.pname)}" maxlength="60"></label>`;
-      h += `<label class="row"><input type="checkbox" id="impMask" data-ch="imp-mask"${imp.mask ? ' checked' : ''}> 계약자명을 가려서 저장 (예: 김*수)</label>`;
-      h += `<div class="row"><button class="btn ${imp.mode === 'replace' ? 'danger' : 'pri'}" data-act="imp-commit">${imp.mode === 'replace' ? `${fmt(res.units.length)}세대로 교체` : `${fmt(res.units.length)}세대 가져오기`}</button></div>`;
-    }
+  if (p.pdf) h += `<p class="muted" style="font-size:12px">PDF는 글자 위치로 표를 복원하므로 열이 어긋날 수 있습니다. 아래 인식 결과를 꼭 확인하고, 가능하면 원본 Excel을 사용하세요.</p>`;
+  if (p.err) h += `<p class="err">${esc(p.err)}</p>`;
+  if (p.res) {
+    const res = p.res;
+    h += `<div><div class="label">인식 결과 · ${p.via === 'claude' ? 'Claude 분석' : p.via === 'manual' ? '직접 지정' : '자동 인식'}</div><p style="margin-top:2px"><b class="num">${fmt(res.units.length)}세대</b>, 옵션 <b class="num">${res.options.length}개</b>${res.flags.length ? `, 색상 표시 ${res.flags.length}종` : ''}</p></div>`;
+    h += impOptTable(res) + impWarnHTML(res.warn, 5);
+    if (inMulti) h += `<div class="row"><button class="btn pri" data-act="imp-part-back">이대로 합치기 — 합친 결과로</button></div>`;
   }
+  return h;
+}
+// 어떻게 가져올지(바뀐 내용만 반영 / 새 단지 / 통째로 교체)와 실행 버튼
+function impModeHTML(imp, res) {
+  let h = '';
+  const canUpd = !!(S.pid && meta() && units().list.length);
+  // 동·호가 겹쳐도 옵션 구성이 다르면 다른 단지로 보고 '새 단지로 추가'를 기본으로
+  const ovr = canUpd ? overlapRatio(res) : 0, omr = canUpd ? optMatchRate(res) : 0;
+  if (!imp.mode || (imp.mode === 'update' && !canUpd)) imp.mode = canUpd && ovr >= 0.5 && omr >= 0.5 ? 'update' : 'new';
+  h += `<div class="steps" style="gap:8px;border-top:1px solid var(--line-2);padding-top:12px"><div class="label">어떻게 가져올까요?</div>
+    ${canUpd ? `<label class="mrad"><input type="radio" name="impMode" id="impUpd" data-ch="imp-mode" value="update"${imp.mode === 'update' ? ' checked' : ''}><span><b>현재 단지(${esc(meta().name)})에 바뀐 내용만 반영</b><span class="hint">새로 받은 자료와 비교해서 달라진 세대만 고칩니다. 변경 이력에 남고 되돌릴 수 있습니다.</span></span></label>` : ''}
+    <label class="mrad"><input type="radio" name="impMode" id="impNew" data-ch="imp-mode" value="new"${imp.mode === 'new' ? ' checked' : ''}><span><b>새 단지로 추가</b></span></label>
+    ${S.pid ? `<label class="mrad"><input type="radio" name="impMode" id="impRep" data-ch="imp-mode" value="replace"${imp.mode === 'replace' ? ' checked' : ''}><span><b>현재 단지를 ${imp.multi ? '합친 자료로' : '이 파일로'} 통째로 교체</b><span class="hint">옵션 구성과 세대가 모두 바뀌고 되돌릴 수 없습니다.</span></span></label>` : ''}
+    ${canUpd && ovr >= 0.5 && omr < 0.5 && imp.mode !== 'update' ? `<p class="hint" style="margin:0">동·호는 현재 단지(${esc(meta().name)})와 겹치는데 옵션은 겹치지 않습니다. <b>같은 단지의 다른 옵션 파일(예: 2차 옵션)이면 ‘바뀐 내용만 반영’</b>을 고르세요. 그 옵션들이 현재 단지에 추가됩니다.</p>` : ''}</div>`;
+  if (imp.mode === 'update') {
+    const nm = namesMasked();
+    h += `<label class="row"><input type="checkbox" id="impMask" data-ch="imp-mask"${imp.mask || nm ? ' checked' : ''}${nm ? ' disabled' : ''}> 계약자명을 가려서 비교·저장${nm ? ' (지금 단지의 이름이 가려져 있어 자동으로 적용)' : ''}</label>`;
+    h += diffView(getDiff(imp), imp);
+  } else {
+    if (imp.mode === 'new') h += `<label class="field">단지 이름<input id="impName" data-ch="imp-name" value="${esc(imp.pname)}" maxlength="60"></label>`;
+    h += `<label class="row"><input type="checkbox" id="impMask" data-ch="imp-mask"${imp.mask ? ' checked' : ''}> 계약자명을 가려서 저장 (예: 김*수)</label>`;
+    h += `<div class="row"><button class="btn ${imp.mode === 'replace' ? 'danger' : 'pri'}" data-act="imp-commit">${imp.mode === 'replace' ? `${fmt(res.units.length)}세대로 교체` : `${fmt(res.units.length)}세대 가져오기`}</button></div>`;
+  }
+  return h;
+}
+function vImportMulti(imp) {
+  if (imp.focus != null) { const p = imp.parts[imp.focus]; if (p && p.sheets) return impEditHTML(p, true); imp.focus = null; }
+  const res = imp.res, M = res && res.merged, nBad = imp.parts.filter(p => !partOK(p)).length;
+  let h = `<div class="row"><b>파일 ${imp.parts.length}개를 한 단지로 합치기</b><span class="sp" style="margin-left:auto"></span><label class="btn sm img-add" id="dropMore">파일 더 추가<input type="file" multiple accept="${IMP_ACCEPT}" data-ch="imp-more" aria-label="합칠 파일 더 추가"></label><button class="btn sm" data-act="imp-cancel">처음부터</button></div>`;
+  h += `<div class="mparts">${imp.parts.map((p, i) => {
+    const ok = partOK(p), r = p.res;
+    const st = p.fatal ? `<span class="err">${esc(p.fatal)}</span>` : ok ? `<b class="num">${fmt(r.units.length)}세대</b> · 옵션 ${r.options.length}개 · ${p.via === 'claude' ? 'Claude 분석' : p.via === 'manual' ? '직접 지정' : '자동 인식'}${!p.base && p.sheets.length > 1 ? ` · 시트 ‘${esc(p.sheets[p.si].name)}’` : ''}` : `<span class="err">표 구조를 찾지 못했습니다 — ‘확인·수정’에서 열을 지정하세요</span>`;
+    return `<div class="mpart${ok ? '' : ' bad'}"><span class="mpn num">${i + 1}</span><div class="mpm"><div class="mpf" title="${esc(p.file)}">${esc(p.file)}</div><div class="mps">${st}</div></div><div class="row mpb">${i ? `<button class="btn sm" data-act="imp-part-up" data-v="${i}" aria-label="${i + 1}번 파일 위로">↑</button>` : ''}${p.sheets ? `<button class="btn sm${ok ? '' : ' pri'}" data-act="imp-part-edit" data-v="${i}">확인·수정</button>` : ''}<button class="btn sm" data-act="imp-part-del" data-v="${i}" aria-label="${i + 1}번 파일 빼기">빼기</button></div></div>`;
+  }).join('')}</div>`;
+  h += `<p class="hint">같은 동·호는 한 세대로, 이름이 같은 옵션은 한 항목으로 합칩니다. 같은 칸의 값이 파일마다 다르면 <b>아래쪽 파일</b>을 따릅니다(↑로 순서 변경).</p>`;
+  if (imp.skipped && imp.skipped.length) h += `<p class="hint">제외한 파일: ${esc(imp.skipped.join(' · '))}</p>`;
+  if (imp.busy) return h + `<p class="muted">${esc(imp.busy)}</p>`;
+  if (!res) return h + `<p class="err">합칠 수 있는 파일이 없습니다. 각 파일의 ‘확인·수정’에서 열을 직접 지정하거나 다른 파일을 추가하세요.</p>`;
+  const ov = M.overlap / Math.max(1, res.units.length);
+  h += `<div><div class="label">합친 결과</div><p style="margin-top:2px"><b class="num">${fmt(res.units.length)}세대</b>, 옵션 <b class="num">${res.options.length}개</b>${res.flags.length ? `, 색상 표시 ${res.flags.length}종` : ''}</p>
+    <p class="muted" style="font-size:13px">${M.overlap === 0 ? '파일끼리 겹치는 세대가 없어 세대를 이어 붙였습니다 (동·타입별로 나뉜 자료).' : ov > 0.5 && M.shared.length <= res.options.length / 2 ? `${fmt(M.overlap)}세대가 여러 파일에 있어, 세대마다 파일별 옵션을 모았습니다 (옵션별로 나뉜 자료).` : ov > 0.5 ? `${fmt(M.overlap)}세대가 같은 옵션으로 여러 파일에 겹쳐 있습니다. 겹친 칸은 아래쪽 파일 값을 썼습니다.` : `${fmt(M.overlap)}세대만 여러 파일에 겹칩니다. 겹친 세대는 하나로 합쳤습니다.`}${M.shared.length ? ` 이름이 같아 한 항목으로 묶은 옵션 ${M.shared.length}개${M.shared.length <= 6 ? `: ${esc(M.shared.join(', '))}` : ''}.` : ''}</p></div>`;
+  if (nBad) h += `<p class="err">인식하지 못한 파일 ${nBad}개는 합친 결과에 들어가지 않았습니다.</p>`;
+  M.alerts.forEach(a => { h += `<div class="warnbox">${esc(a)}</div>`; });
+  if (M.conflicts.length) h += `<div class="warnbox"><b>같은 세대·같은 항목인데 파일마다 값이 다른 곳 ${fmt(M.conflicts.length)}건</b> — 아래쪽 파일 값을 넣었습니다. 다르면 안 되는 자료라면 원본을 확인하세요.<ul>${M.conflicts.slice(0, 50).map(c => `<li>${esc(c.key)} ${esc(shortName(c.lab))}: ${esc(c.a)} <span class="faint">(파일 ${c.ai + 1})</span> → <b>${esc(c.b)}</b> <span class="faint">(파일 ${c.bi + 1})</span></li>`).join('')}${M.conflicts.length > 50 ? `<li>…외 ${fmt(M.conflicts.length - 50)}건</li>` : ''}</ul></div>`;
+  const notes = M.notes.concat(M.mixed ? [`옵션계약 체결 여부가 파일마다 다른 세대 ${fmt(M.mixed)}곳은 ‘체결’로 넣었습니다 (한 파일이라도 체결이면 체결).`] : []);
+  if (notes.length) h += impWarnHTML(notes, 8);
+  if (imp.pdf) h += `<p class="muted" style="font-size:12px">PDF가 섞여 있습니다. PDF는 글자 위치로 표를 복원하므로 열이 어긋날 수 있으니 결과를 꼭 확인하세요.</p>`;
+  h += impOptTable(res, M.src);
+  if (res.warn.length) h += impWarnHTML(res.warn, 6);
+  return h + impModeHTML(imp, res);
+}
+function vImport() {
+  const imp = S.mg.imp;
+  let h = `<section class="panel"><div class="panel-h"><h2>파일에서 가져오기</h2></div><div class="panel-b steps">`;
+  if (!imp || imp.fatal) {
+    h += `<div class="drop" id="drop"><p><b>옵션 계약 내역 파일</b>을 여기에 끌어다 놓거나</p><p style="margin:10px 0"><label class="btn pri" for="impFile">파일 선택</label><input class="sr" type="file" id="impFile" multiple accept="${IMP_ACCEPT},.json"></p><p class="faint" style="font-size:12px">Excel(.xlsx) · CSV · PDF. 동·호 열과 옵션별 표시(1, O, ✓ 또는 선택값)가 있는 세대 목록이면 옵션 항목까지 자동으로 구성됩니다. <b>옵션이 여러 파일(1차·2차, 동별 등)로 나뉘어 있으면 한꺼번에 여러 개를 선택하세요.</b> 한 단지로 합칩니다. 이 사이트에서 저장한 백업(.json)도 여기로 복원합니다.</p></div>`;
+    if (imp && imp.fatal) h += `<p class="err">${esc(imp.file)}: ${esc(imp.fatal)}</p>`;
+    return h + `</div></section>`;
+  }
+  if (imp.multi) return h + vImportMulti(imp) + `</div></section>`;
+  if (imp.busy && !imp.sheets) return h + `<p class="muted">${esc(imp.busy)}</p></div></section>`;
+  h += impEditHTML(imp, false);
+  if (imp.res) h += impModeHTML(imp, imp.res);
   return h + `</div></section>`;
 }
 function vManage() {
@@ -2504,8 +2724,21 @@ document.addEventListener('click', e => {
     }
     case 'imp-cancel': S.mg.imp = null; break;
     case 'imp-claude': runClaude(); return;
-    case 'imp-mm-toggle': S.mg.imp.mmOpen = !S.mg.imp.mmOpen; break;
+    case 'imp-mm-toggle': { const p = impNow(); p.mmOpen = !p.mmOpen; break; }
     case 'imp-manual': runManual(); break;
+    case 'imp-sh-toggle': { const p = impNow(); p.shOpen = !p.shOpen; break; }
+    case 'imp-sheets-merge': {
+      const top = S.mg.imp, p = impNow(); if (!p || !p.sheets) break;
+      const idx = [...new Set([p.si, ...(p.shSel || [])])].sort((x, y) => x - y); if (idx.length < 2) break;
+      const ps = sheetParts(p, idx);
+      if (top.multi) { top.parts.splice(top.parts.indexOf(p), 1, ...ps); top.focus = null; remerge(top); }
+      else { const sh = newShell(top); sh.parts = ps; remerge(sh); S.mg.imp = sh; }
+      window.scrollTo(0, 0); break;
+    }
+    case 'imp-part-edit': S.mg.imp.focus = +v; window.scrollTo(0, 0); break;
+    case 'imp-part-back': S.mg.imp.focus = null; window.scrollTo(0, 0); break;
+    case 'imp-part-up': { const imp = S.mg.imp, i = +v; if (i > 0 && imp.parts[i]) { [imp.parts[i - 1], imp.parts[i]] = [imp.parts[i], imp.parts[i - 1]]; remerge(imp); } break; }
+    case 'imp-part-del': { const imp = S.mg.imp; imp.parts.splice(+v, 1); if (imp.parts.length <= 1) S.mg.imp = toSingle(imp); else remerge(imp); break; }
     case 'proj-export': exportBackup(); return;
     case 'dt-open': if (window.__desktop) window.__desktop.openDir(); return;
     case 'img-view': openLightbox(t.dataset.o, t.dataset.c, t.dataset.sel); return;
@@ -2611,10 +2844,12 @@ document.addEventListener('change', e => {
     case 'hist-q': S.hv.q = norm(t.value); break;
     case 'diff-newopts': S.mg.imp.addOpts = t.checked; break;
     case 'nf-name': S.mg.nfName = t.value; return;
-    case 'imp-sheet': { const imp = S.mg.imp, sh = imp.sheets[+t.value]; imp.si = +t.value; imp.err = ''; if (sh._auto) { imp.res = sh._auto.r; imp.via = 'auto'; imp.mm = mmFrom(sh._auto.m); } else { imp.res = null; imp.mm = mmFrom(null); imp.mmOpen = true; imp.err = '이 시트에서는 세대 목록을 자동으로 찾지 못했습니다. ‘열 직접 지정’을 사용해 주세요.'; } break; }
-    case 'imp-mode': S.mg.imp.mode = t.value; break;
-    case 'mm': S.mg.imp.mm[t.dataset.f] = t.value; return;
-    case 'imp-name': S.mg.imp.pname = t.value; return;
+    case 'imp-sheet': { const top = S.mg.imp, imp = impNow(), sh = imp.sheets[+t.value]; imp.si = +t.value; imp.err = ''; imp.shSel = null; if (sh._auto) { imp.res = sh._auto.r; imp.via = 'auto'; imp.mm = mmFrom(sh._auto.m); } else { imp.res = null; imp.mm = mmFrom(null); imp.mmOpen = true; imp.err = '이 시트에서는 세대 목록을 자동으로 찾지 못했습니다. ‘열 직접 지정’을 사용해 주세요.'; } if (top.multi) remerge(top); break; }
+    case 'imp-mode': S.mg.imp.mode = t.value; S.mg.imp.modeSet = true; break;
+    case 'mm': impNow().mm[t.dataset.f] = t.value; return;
+    case 'imp-name': S.mg.imp.pname = t.value; S.mg.imp.pnameAuto = false; return;
+    case 'imp-more': { const fs = [...(t.files || [])]; t.value = ''; if (fs.length) loadImports(fs, S.mg.imp); return; }
+    case 'imp-shsel': { const p = impNow(), i = +t.value, s = new Set(p.shSel || []); if (t.checked) s.add(i); else s.delete(i); p.shSel = [...s]; break; }
     case 'imp-mask': S.mg.imp.mask = t.checked; if (S.mg.imp.mode === 'update') break; return;
     case 'pj-name': m.name = norm(t.value) || '이름 없는 단지'; saveMeta(); renderHead(); return;
     case 'pj-asof': m.asOf = t.value; saveMeta(); return;
@@ -2626,10 +2861,12 @@ document.addEventListener('change', e => {
   }
   render();
 });
-document.addEventListener('change', e => { if (e.target.id === 'impFile' && e.target.files[0]) loadImport(e.target.files[0]); });
-document.addEventListener('dragover', e => { const d = document.getElementById('drop'); if (d) { e.preventDefault(); d.classList.add('over'); } });
-document.addEventListener('dragleave', () => { const d = document.getElementById('drop'); if (d) d.classList.remove('over'); });
-document.addEventListener('drop', e => { const d = document.getElementById('drop'); if (!d) return; e.preventDefault(); d.classList.remove('over'); const f = e.dataTransfer && e.dataTransfer.files[0]; if (f) loadImport(f); });
+document.addEventListener('change', e => { if (e.target.id === 'impFile' && e.target.files.length) { const fs = [...e.target.files]; e.target.value = ''; loadImports(fs); } });
+// 빈 화면에서는 새로 가져오기, 파일을 읽은 뒤에는 '파일 더 합치기'로 끌어다 놓기
+const dropEl = () => document.getElementById('drop') || document.getElementById('dropMore');
+document.addEventListener('dragover', e => { const d = dropEl(); if (d) { e.preventDefault(); d.classList.add('over'); } });
+document.addEventListener('dragleave', () => { const d = dropEl(); if (d) d.classList.remove('over'); });
+document.addEventListener('drop', e => { const d = dropEl(); if (!d) return; e.preventDefault(); d.classList.remove('over'); const fs = [...((e.dataTransfer && e.dataTransfer.files) || [])]; if (!fs.length) return; if (d.id === 'dropMore') loadImports(fs, S.mg.imp); else loadImports(fs); });
 window.addEventListener('hashchange', route);
 document.addEventListener('keydown', e => {
   const tag = (e.target.tagName || '').toLowerCase(), typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;

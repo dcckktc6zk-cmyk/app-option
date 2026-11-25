@@ -536,7 +536,7 @@ window.__maskDefault = true;   // 폰 분실 대비: 엑셀을 가져올 때 계
 try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(v => { if (window.__localInfo) window.__localInfo.persisted = v; }); } catch (e) {}
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 (() => {
-  const V = '1.4', B = '2026-11-24';
+  const V = '1.4.1', B = '2026-11-25';
   if (window.__localInfo) window.__localInfo.about = `앱 버전 ${V} (${B}) · 현장 업무 보조용 개인 제작 도구이며, 회사 공식 시스템이 아닙니다.`;
   try { const pv = localStorage.getItem('aptopt-ver'); if (pv && pv !== V) window.__startupNote = `새 버전(${V})으로 업데이트되었습니다. 저장된 데이터는 그대로입니다.`; localStorage.setItem('aptopt-ver', V); } catch (e) {}
   window.__welcomeHTML = () => `<div class="panel welcome"><div class="wl-logos"><img src="gs-logo.png" alt="GS건설"><i></i><img class="wl-xi" src="xi-navy.png" alt="Xi"></div>
@@ -629,7 +629,14 @@ function kOf(o, cid) {
   let i = 0; for (const c of o.choices) { if (c.id === b) continue; i++; if (c.id === cid) return ((i - 1) % 4) + 1; }
   return -1;
 }
-const splitName = n => { const m = String(n || '').match(/^(.*?\S)\s*(\([^()]*\))$/); return m ? [m[1], m[2]] : [String(n || ''), '']; };
+// '선택3-1 (3대:침실2,3,4(알파룸))'처럼 괄호 안에 괄호가 있어도 맨 끝 괄호 묶음을 떼어 냄
+const splitName = n => {
+  const s = String(n || ''); if (!/\)$/.test(s)) return [s, ''];
+  let d = 0, i = s.length - 1;
+  for (; i >= 0; i--) { if (s[i] === ')') d++; else if (s[i] === '(' && !--d) break; }
+  const head = i > 0 ? s.slice(0, i).replace(/\s+$/, '') : '';
+  return head ? [head, s.slice(i)] : [s, ''];
+};
 const shortName = n => splitName(n)[0];
 const nameHTML = n => { const [a, b] = splitName(n); return esc(a) + (b ? `<small class="sub">${esc(b)}</small>` : ''); };
 const chHTML = n => { const [a, b] = splitName(n); return esc(a) + (b ? `<small class="csub">${esc(b)}</small>` : ''); };
@@ -888,7 +895,7 @@ async function readXlsx(buf) {
     }
     for (let i = 0; i < rows.length; i++) { if (!rows[i]) rows[i] = []; for (let j = 0; j < rows[i].length; j++) if (rows[i][j] == null) rows[i][j] = ''; }
     const merges = els(d, 'mergeCell').map(m => { const [a, b] = (m.getAttribute('ref') || '').split(':'); if (!b) return null; const rc = s => ({r: +s.replace(/\D/g, '') - 1, c: colIndex(s)}); const A = rc(a), B = rc(b); return {r1: A.r, c1: A.c, r2: B.r, c2: B.c}; }).filter(Boolean);
-    sheets.push({name: sh.getAttribute('name') || '시트', rows, merges, rowFill});
+    sheets.push({name: sh.getAttribute('name') || '시트', rows, merges, rowFill, hidden: /hidden/i.test(sh.getAttribute('state') || '')});
   }
   if (!sheets.length) throw new Error('읽을 수 있는 시트가 없습니다.');
   return sheets;
@@ -999,6 +1006,8 @@ function findLegend(sheets) {
   return null;
 }
 const QTY_BAD = /(층|라인|면적|전용|공급|금액|가격|단가|원\)|\(원|합계|소계|번호|순번|^no|평$|㎡|m2|코드|일자|년도)/i;
+const MEMO_H = /^(비고|메모|특이사항|참고|기타|기타사항|요청사항|특기사항|확인사항)\d*$/;
+const NONOPT_H = /(층|라인|면적|전용|공급|분양|금액|가격|단가|합계|소계|번호|순번|^no$|코드|일자|날짜|년도|전화|연락처|주소|상태|구분|여부)/i;
 function autoMap(sh) {
   const rows = sh.rows, H = fillMerges(sh, 40), legend = sh._legend || null;
   let hr = -1, cols = null;
@@ -1009,7 +1018,7 @@ function autoMap(sh) {
   let ds = -1;
   for (let r = hr + 1; r < Math.min(rows.length, hr + 12); r++) { if (/\d/.test((rows[r] || [])[keyCol] || '')) { ds = r; break; } }
   if (ds < 0) return null;
-  const ids = new Set(Object.values(cols).filter(v => v != null));
+  const ids = new Set(Object.values(cols).filter(v => v != null && !Array.isArray(v)));
   // 같은 세대가 여러 줄이면 '한 줄에 옵션 하나'인 세로형 표
   let nData = 0, dup = 0; const seenK = new Set();
   for (let r = ds; r < rows.length; r++) { const row = rows[r]; if (!row || !/\d/.test(norm(row[keyCol] || ''))) continue; nData++; const k = (cols.dong != null ? norm(row[cols.dong]) : '') + '|' + norm(row[keyCol]); if (seenK.has(k)) dup++; else seenK.add(k); }
@@ -1021,7 +1030,8 @@ function autoMap(sh) {
   }
   const width = rows.reduce((m, r) => Math.max(m, r.length), 0);
   const hText = c => { const p = []; for (let r = hr; r < ds; r++) { const v = norm((H[r] || [])[c]); if (v && !p.includes(v)) p.push(v); } return p.join(' '); };
-  const kind = [];
+  const kind = [], memos = [];
+  let nRows = 0; for (let r = ds; r < rows.length; r++) if (/\d/.test((rows[r] || [])[keyCol] || '')) nRows++;
   for (let c = 0; c < width; c++) {
     if (ids.has(c)) { kind[c] = null; continue; }
     const vals = new Map(), toks = new Map(); let n = 0, yes = 0, mark = true, datey = true, numy = true, ints = true, multiN = 0, codeN = 0;
@@ -1036,16 +1046,21 @@ function autoMap(sh) {
       if (toks.size <= 40) tk.forEach(t => toks.set(t, (toks.get(t) || 0) + 1));
       if (legend && tk.length && tk.every(t => legend.map[codeKey(t)])) codeN++;
     }
-    let k = null;
+    let k = null; const ht = hText(c);
     if (!n) k = null;
     else if (mark && yes) k = 'mark';
     else if (legend && codeN >= n * 0.8) k = 'codes';
     else if (datey) k = null;
-    else if (numy) k = ints && vals.size >= 2 && vals.size <= 12 && !QTY_BAD.test(hText(c)) ? 'qty' : null;
-    else if (multiN >= Math.max(2, n * 0.15) && toks.size >= 2 && toks.size <= 15) k = 'multi';
-    else k = vals.size > 15 || vals.size < 2 ? null : 'value';
+    else if (numy) k = ints && vals.size >= 2 && vals.size <= 12 && !QTY_BAD.test(ht) ? 'qty' : null;
+    else if (!ht || MEMO_H.test(ht.replace(/\s/g, ''))) k = 'memo';   // 머리글 없는 글자 칸, 두 번째 비고 칸 → 세대 메모
+    // 한 칸에 여러 품목: 나눠서 조합 수가 줄어들 때만 ('2대:침실2,3' 같은 설명이나 'A+B' 묶음 모델은 나누지 않음)
+    else if (multiN >= Math.max(2, n * 0.15) && toks.size >= 2 && toks.size <= 15 && vals.size > toks.size && ![...toks.keys()].some(t => /^\d+$/.test(t))) k = 'multi';
+    else if (vals.size === 1) k = n >= 2 && n < nRows && !NONOPT_H.test(ht) ? 'value' : null;   // 값이 한 가지(모델명 등): 적혀 있으면 선택, 비면 미선택
+    else k = vals.size > 15 ? null : 'value';
+    if (k === 'memo') { memos.push(c); k = null; }
     kind[c] = k;
   }
+  if (memos.length) cols = Object.assign({}, cols, {memos});
   // header rows: from hr to the last pre-data row that carries text labels
   let he = hr;
   for (let r = hr + 1; r < ds; r++) { let txt = 0; (H[r] || []).forEach((v, c) => { if (!ids.has(c) && norm(v) && isNaN(norm(v).replace(/,/g, ''))) txt++; }); if (txt) he = r; }
@@ -1088,6 +1103,7 @@ function rowUnit(row, C) {
   if (C.cdate != null && norm(row[C.cdate])) u.cd = normDate(row[C.cdate]);
   if (C.odate != null && norm(row[C.odate])) u.od = normDate(row[C.odate]);
   if (C.memo != null && norm(row[C.memo])) u.m = norm(row[C.memo]);
+  if (C.memos) C.memos.forEach(c => { const v = norm(row[c]); if (v && !(u.m || '').split(' / ').includes(v)) u.m = u.m ? u.m + ' / ' + v : v; });
   return u;
 }
 /* 세대별 '구분 · 품목' 목록을 옵션으로 묶는다. 한 세대가 같은 구분에서 여러 개를 골랐으면 품목마다 '선택/선택 안 함' 옵션으로 나눈다. */
@@ -1170,11 +1186,24 @@ function labelFlagsFromNotes(flags, rows, upto) {
     f.label = t.length > 30 ? t.slice(0, 30) + '…' : t;
   });
 }
+// '시스템에어컨 설치위치'처럼 옆 옵션을 설명하는 칸 찾기 (머리글이 '옵션 이름 + 위치·상세·내용…')
+const DETAIL_RE = /^(설치)?(위치|장소|실|공간)$|^(상세|세부)?(내용|사양|설명|규격|구성|설치위치)$|^상세$/;
+function markDetails(opts) {
+  const nsp = t => norm(t).replace(/\s/g, ''), vals = opts.filter(mo => mo.kind === 'value');
+  vals.forEach((mo, i) => {
+    const n = nsp(mo.name);
+    let base = vals.filter(b => b !== mo && n.length > nsp(b.name).length && n.startsWith(nsp(b.name)) && DETAIL_RE.test(n.slice(nsp(b.name).length))).sort((a, b) => nsp(b.name).length - nsp(a.name).length)[0];
+    if (!base && DETAIL_RE.test(n) && i > 0 && vals[i - 1].col === mo.col - 1 && !vals[i - 1].detailOf) base = vals[i - 1];   // 머리글이 '설치위치'뿐이면 바로 왼쪽 옵션
+    mo.detailOf = base && !base.detailOf ? base : null;
+  });
+}
 function applyMap(sh, map) {
   if (map.long) return applyLong(sh, map);
   const rows = sh.rows, C = map.cols, warn = [], legend = sh._legend || null, keyCol = C.ho != null ? C.ho : C.dongho;
   let on = 0; const nextId = () => 'o' + (++on), options = [];
+  markDetails(map.options);
   map.options.forEach(mo => {
+    if (mo.detailOf) { mo._det = new Map(); return; }
     if (mo.kind === 'mark') {
       const o = {id: nextId(), name: norm(mo.name) || '옵션', choices: []}; options.push(o); mo._o = o;
       mo._c = mo.choices.map(ch => { const nm = norm(ch.name) || '선택'; let c = o.choices.find(x => x.name === nm); if (!c) { c = {id: 'c' + (o.choices.length + 1), name: nm}; o.choices.push(c); } return {col: ch.col, id: c.id, unc: !!ch.unc}; });
@@ -1213,8 +1242,10 @@ function applyMap(sh, map) {
       } else if (mo.kind === 'codes') {
         const its = splitMulti(norm(row[mo.col])).map(t => legend && legend.map[codeKey(t)]).filter(Boolean).map(x => ({cat: x.cat, item: x.name, qty: null, free: x.free}));
         codeItems.set(u, (codeItems.get(u) || []).concat(its));
+      } else if (mo.detailOf) {
+        const raw = norm(row[mo.col]); if (raw) mo._det.set(u, raw);
       } else {
-        const o = mo._o, raw = norm(row[mo.col]); if (!raw) return;
+        const o = mo._o, raw = norm(row[mo.col]); if (!raw) { (mo._blank || (mo._blank = [])).push(u); return; }
         const v = mo.unit !== undefined && /^\d+$/.test(raw.replace(/,/g, '')) ? raw.replace(/,/g, '') + (mo.unit || '') : raw;
         let id = mo._vals.get(v); if (!id) { id = 'c' + (mo._vals.size + 1); mo._vals.set(v, id); o.choices.push({id, name: v}); }
         u.s[o.id] = id;
@@ -1232,6 +1263,31 @@ function applyMap(sh, map) {
     const per = new Map(units.map(u => [ukey(u), {u, items: codeItems.get(u) || []}]));
     pivotItems(per, legend.order, nextId).forEach(o => options.push(o));
   }
+  // 모델명·코드만 적힌 칸(기본값이 따로 없음): 빈칸 = 미선택. 단, 그 타입에서 고른 세대가 하나도 없으면 '해당 없음'으로 둠
+  const live = new Set(units);
+  map.options.forEach(mo => {
+    const o = mo._o; if (mo.kind !== 'value' || mo.detailOf || !o || !o.choices.length) return;
+    const blank = (mo._blank || []).filter(u => live.has(u)); if (!blank.length) return;
+    if (o.choices.some(c => BASE_RE.test(c.name) || /^0(\D.*)?$/.test(c.name))) return;   // 기본·0이 따로 적힌 칸이면 빈칸은 그대로(모름)
+    // 아무도 안 고른 타입: 다른 타입의 선택률로 봐서 우연히 0건일 확률이 1% 미만일 때만 '그 타입엔 없는 옵션(해당 없음)'
+    const typesWith = new Set(units.filter(u => u.s[o.id] != null).map(u => u.t || '')), typeN = new Map();
+    units.forEach(u => typeN.set(u.t || '', (typeN.get(u.t || '') || 0) + 1));
+    const inWith = units.filter(u => typesWith.has(u.t || '')).length, pr = inWith ? units.filter(u => u.s[o.id] != null).length / inWith : 0;
+    const tgt = C.type == null ? blank : blank.filter(u => typesWith.has(u.t || '') || Math.pow(1 - pr, typeN.get(u.t || '')) >= 0.01);
+    if (!tgt.length) return;
+    const rest = o.choices.slice();
+    if (mo.unit !== undefined) rest.sort((x, y) => parseInt(x.name, 10) - parseInt(y.name, 10));
+    else if (rest.length > 1 && rest.every(c => /\d/.test(c.name))) rest.sort((x, y) => x.name.localeCompare(y.name, 'ko', {numeric: true}));   // 선택2-1, 선택3-1 … 순서로
+    o.choices = [{id: 'c0', name: '미선택', b: 1}, ...rest]; tgt.forEach(u => { u.s[o.id] = 'c0'; });
+  });
+  // 설명 칸: 선택지마다 값이 하나로 정해져 있으면 선택지 이름에 붙이고(선택2-1 (2대:침실2,3)), 아니면 세대 메모로
+  map.options.filter(mo => mo.detailOf && mo._det).forEach(mo => {
+    const bo = mo.detailOf._o; if (!bo) return;
+    const per = new Map(); let ok = true;
+    mo._det.forEach((v, u) => { if (!live.has(u)) return; const cid = u.s[bo.id]; if (cid == null || cid === 'c0') { ok = false; return; } const d = per.get(cid); if (d == null) per.set(cid, v); else if (d !== v) ok = false; });
+    if (ok && per.size) { bo.choices.forEach(c => { const d = per.get(c.id); if (d && !c.name.includes(d)) c.name = `${c.name} (${d})`; }); warn.push(`'${norm(mo.name)}' 칸은 '${bo.name}' 선택지마다 하나로 정해져 있어 선택지 이름에 붙였습니다.`); }
+    else { mo._det.forEach((v, u) => { if (!live.has(u)) return; const t = `${norm(mo.name)}: ${v}`; if (!(u.m || '').includes(t)) u.m = u.m ? u.m + ' / ' + t : t; }); warn.push(`'${norm(mo.name)}' 칸은 선택지와 1:1로 맞지 않아 세대 메모에 넣었습니다.`); }
+  });
   options.forEach(o => {
     if (o.choices.some(c => c.b)) return;
     if (o.choices.length && o.choices.every(c => /^\d+/.test(c.name))) { o.choices.sort((a, b) => parseInt(a.name, 10) - parseInt(b.name, 10)); o.choices[0].b = 1; return; }
@@ -1240,7 +1296,11 @@ function applyMap(sh, map) {
   if (multi) warn.push('한 옵션에 표시가 두 개 이상인 칸이 ' + multi + '곳 있습니다. 오른쪽 열의 표시를 사용했습니다.');
   const kept = options.filter(o => units.some(u => u.s[o.id] != null));
   if (kept.length < options.length) warn.push('표시가 하나도 없는 옵션 ' + (options.length - kept.length) + '개는 제외했습니다.');
-  if (flags.length && C.flag == null) labelFlagsFromNotes(flags, rows, map.dataStart);
+  if (flags.length && C.flag == null) {
+    labelFlagsFromNotes(flags, rows, map.dataStart);
+    // 안내문이 없으면: 그 색 세대 대부분이 같은 비고(예: 옵션미선택)를 갖고 있을 때 그 비고를 이름으로
+    flags.forEach(f => { if (!/^색상 표시 \d+$/.test(f.label)) return; const us = units.filter(u => u.f === f.id), cnt = new Map(); us.forEach(u => { if (u.m) cnt.set(u.m, (cnt.get(u.m) || 0) + 1); }); const top = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0]; if (top && top[1] >= Math.max(2, us.length * 0.9) && top[0].length <= 20) f.label = top[0]; });
+  }
   return {options: kept, flags, units, warn, flagCol: C.flag != null};
 }
 function sheetDigest(sh, i) {
@@ -1478,8 +1538,8 @@ async function parseImportFile(file) {
   else sheets = [readCsv(buf, file.name)];
   const legend = findLegend(sheets); if (legend) sheets.forEach(sh => { if (sh.name !== legend.sheet) sh._legend = legend; });
   const imp = {file: file.name, size: file.size, mtime: file.lastModified, sheets, si: 0, mask: !!window.__maskDefault, mode: null, addOpts: true, pname: file.name.replace(/\.[^.]+$/, '').slice(0, 60), pdf: /\.pdf$/i.test(file.name)};
-  let best = -1, bn = 0;
-  sheets.forEach((sh, i) => { try { const m = autoMap(sh); if (m) { const r = applyMap(sh, m); sh._auto = {m, r}; if (r.units.length > bn) { bn = r.units.length; best = i; } } } catch (e) {} });
+  let best = -1, bn = 0;   // 세대가 가장 많은 시트, 단 숨김 시트(다른 현장 자료가 남아 있는 경우가 많음)는 보이는 시트가 없을 때만
+  sheets.forEach((sh, i) => { try { const m = autoMap(sh); if (m) { const r = applyMap(sh, m); sh._auto = {m, r}; const sc = r.units.length ? r.units.length + (sh.hidden ? 0 : 1e7) : 0; if (sc > bn) { bn = sc; best = i; } } } catch (e) {} });
   if (best >= 0 && imp.pdf && sheets[best]._auto.r.options.some(o => /계약\s*(미)?체결|^옵션 [A-Z]+$/.test(o.name))) { imp.si = best; imp.mm = mmFrom(sheets[best]._auto.m); imp.mm.text = ''; imp.mmOpen = true; sheets.forEach(sh => delete sh._auto); best = -2; }
   if (best >= 0) { imp.si = best; imp.res = sheets[best]._auto.r; imp.via = 'auto'; imp.mm = mmFrom(sheets[best]._auto.m); }
   else if (best === -2) imp.err = 'PDF에서 표는 읽었지만, 여러 줄로 병합된 머리글을 옵션별로 묶지 못했습니다. ' + (S.sample ? '‘Claude로 구조 분석’이나 ' : '') + '아래 ‘열 직접 지정’을 사용해 주세요.';
@@ -1989,8 +2049,10 @@ function vOverview() {
     return n ? `<td${bg}><button class="cb" data-act="drill" ${attrs} title="${k} — ${fmt(n)} / ${fmt(a)}세대 (${pct(n, a)}). 눌러서 비교 화면에서 보기">${txt}</button></td>` : `<td class="z">${txt}</td>`;
   };
   h += `<section class="panel"><div class="panel-h"><h2>유상옵션 집계표</h2><span class="hint">색이 진할수록 선택율이 높습니다 · 숫자를 누르면 그 세대들을 비교</span><div class="row sp"><div class="row" role="group" aria-label="집계 기준">${Object.keys(DIMS).map(k => `<button class="chip" data-act="ov-dim" data-v="${k}" aria-pressed="${dim === k}">${DIMS[k]}별</button>`).join('')}</div><div class="row" role="group" aria-label="표시 값"><button class="chip" data-act="ov-val" data-v="n" aria-pressed="${val === 'n'}">세대 수</button><button class="chip" data-act="ov-val" data-v="r" aria-pressed="${val === 'r'}">선택율</button></div>${S.downloads ? `<button class="btn sm" data-act="x-pivot">엑셀로 저장</button>` : ''}</div></div><div class="scroll-x" data-scroll="pivot"><table class="grid num"><thead><tr><th class="stick" rowspan="2">${DIMS[dim]}</th><th rowspan="2">세대</th>`;
-  P.groups.forEach(g => h += `<th class="og" colspan="${g.n}">${nameHTML(g.o.name)}</th>`);
-  h += `</tr><tr>` + P.colsP.map(p => `<th title="${esc(p.c.name)}">${esc(chLabel(p.o, p.c))}</th>`).join('') + `</tr></thead><tbody>`;
+  // 유상 선택지가 하나뿐인 옵션(광파오븐 = 모델 하나 등)은 머리글 두 줄을 합치고 모델명은 작게
+  const solo = new Map(); P.groups.forEach(g => { if (g.n === 1) solo.set(g.o, P.colsP.find(p => p.o === g.o).c); });
+  P.groups.forEach(g => { const c = solo.get(g.o); h += c ? `<th class="og" rowspan="2" title="${esc(g.o.name + ' · ' + c.name)}">${nameHTML(g.o.name)}${/^선택$/.test(c.name) ? '' : `<span class="csub" style="display:block;font-size:10px;font-weight:400;overflow-wrap:anywhere;margin-top:2px">${esc(chLabel(g.o, c))}</span>`}</th>` : `<th class="og" colspan="${g.n}">${nameHTML(g.o.name)}</th>`; });
+  h += `</tr><tr>` + P.colsP.map(p => solo.has(p.o) ? '' : `<th title="${esc(p.c.name)}">${esc(chLabel(p.o, p.c))}</th>`).join('') + `</tr></thead><tbody>`;
   P.rows.forEach(r => {
     h += `<tr><th class="stick">${esc(r.label)}</th><td>${fmt(r.n)}</td>`;
     r.cells.forEach((c, i) => { const p = P.colsP[i]; h += cellOf(c.n, c.a, `data-o="${esc(p.o.id)}" data-c="${esc(p.c.id)}" data-dim="${dim}" data-k="${esc(r.k)}"`, esc(r.label + ' · ' + p.o.name + ' · ' + p.c.name)); });
@@ -2086,7 +2148,7 @@ function vUnits() {
     if (hasImgs(o)) { const cc = o.choices.find(x => x.id === c), n = o.choices.filter(x => x.img).length; th = cc && cc.img ? `<button class="othumb" data-act="img-view" data-o="${esc(o.id)}" data-c="${esc(cc.id)}" data-sel="${esc(c)}" title="${esc(cc.name)} 사진 크게 보기">${imgTag(cc.img, true, cc.name)}${n > 1 ? `<span class="tag">${n}</span>` : ''}</button>` : `<button class="othumb more" data-act="img-view" data-o="${esc(o.id)}" data-c="" data-sel="${esc(c)}" title="다른 선택지 사진 보기">사진 ${n}</button>`; }
     const wst = wStat(u, o), ww = wGet(u, o.id);
     const wchip = wst && (ww || uv.mode === 'work') ? `<button class="wchip st-${wst}" data-act="ws-open" data-key="${esc(uv.key)}" data-o="${esc(o.id)}" title="${esc(wWhy(u, o) || '시공 상태 바꾸기')}">시공 ${W_TXT[wst]}${ww && ww.t && wst === 'done' ? ' · ' + esc(ww.t.slice(5)) : ''}${ww && ww.ph && ww.ph.length ? ' · 사진 ' + ww.ph.length : ''}</button>` : '';
-    h += `<div class="orow"><div class="on">${nameHTML(o.name)}</div><div><div class="ocell"><div class="choices">${o.choices.map(x => `<span class="choice${x.id === c ? ' sel k' + kOf(o, x.id) : ''}">${chHTML(x.name)}</span>`).join('')}</div>${th}</div>${prev ? `<div class="prev">변경 전: ${esc(chName(o, prev))}</div>` : ''}${wchip}${ww && ww.m ? `<div class="wmemo">메모: ${esc(ww.m)}</div>` : ''}</div></div>`;
+    h += `<div class="orow"><div class="on">${nameHTML(o.name)}</div><div><div class="ocell"><div class="choices">${o.choices.map(x => x.id === c ? `<span class="choice sel k${kOf(o, x.id)}">${chHTML(x.name)}</span>` : `<span class="choice" title="${esc(x.name)}">${esc(chLabel(o, x))}</span>`).join('')}</div>${th}</div>${prev ? `<div class="prev">변경 전: ${esc(chName(o, prev))}</div>` : ''}${wchip}${ww && ww.m ? `<div class="wmemo">메모: ${esc(ww.m)}</div>` : ''}</div></div>`;
   });
   h += `</div>${na.length ? `<p class="faint" style="font-size:12px;padding:10px 0 4px;border-top:1px solid var(--line-2)">이 세대에 해당 없는 옵션: ${esc(na.join(' · '))}</p>` : ''}`;
   if (uv.edit) h += `<div class="row" style="padding-top:10px;border-top:1px solid var(--line-2)">${uv.del ? `<span class="err">이 세대를 삭제할까요?</span><button class="btn sm danger" data-act="unit-del-yes">삭제</button><button class="btn sm" data-act="unit-del-no">취소</button>` : `<button class="btn sm danger" data-act="unit-del">세대 삭제</button>`}</div>`;
@@ -2191,13 +2253,13 @@ function impOptTable(res, src) {
 const impWarnHTML = (warn, n) => warn.length ? `<ul class="muted" style="margin:0;padding-left:18px;font-size:12px">${warn.slice(0, n).map(w => `<li>${esc(w)}</li>`).join('')}${warn.length > n ? `<li>외 ${warn.length - n}건</li>` : ''}</ul>` : '';
 // 파일 하나(또는 합치기 중인 파일 하나)의 인식 화면: 시트 · Claude 분석 · 열 직접 지정 · 인식 결과
 function impEditHTML(p, inMulti) {
-  let h = `<div class="row">${inMulti ? `<button class="btn sm" data-act="imp-part-back">← 합친 결과로</button>` : ''}<span class="tag" style="max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.file)}</span>${p.sheets.length > 1 && !p.base ? `<label class="field">시트<select id="impSheet" data-ch="imp-sheet">${p.sheets.map((s, i) => `<option value="${i}"${i === p.si ? ' selected' : ''}>${esc(s.name)}${s._auto ? ' — ' + fmt(s._auto.r.units.length) + '세대' : ''}</option>`).join('')}</select></label>` : ''}<span class="sp" style="margin-left:auto"></span>${inMulti ? '' : `<label class="btn sm img-add" id="dropMore" title="1차·2차, 동별처럼 나뉜 파일을 한 단지로 합칩니다">파일 더 합치기<input type="file" multiple accept="${IMP_ACCEPT}" data-ch="imp-more" aria-label="합칠 파일 더 선택"></label><button class="btn sm" data-act="imp-cancel">다른 파일</button>`}</div>`;
+  let h = `<div class="row">${inMulti ? `<button class="btn sm" data-act="imp-part-back">← 합친 결과로</button>` : ''}<span class="tag" style="max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.file)}</span>${p.sheets.length > 1 && !p.base ? `<label class="field">시트<select id="impSheet" data-ch="imp-sheet">${p.sheets.map((s, i) => `<option value="${i}"${i === p.si ? ' selected' : ''}>${esc(s.name)}${s.hidden ? ' (숨김)' : ''}${s._auto ? ' — ' + fmt(s._auto.r.units.length) + '세대' : ''}</option>`).join('')}</select></label>` : ''}<span class="sp" style="margin-left:auto"></span>${inMulti ? '' : `<label class="btn sm img-add" id="dropMore" title="1차·2차, 동별처럼 나뉜 파일을 한 단지로 합칩니다">파일 더 합치기<input type="file" multiple accept="${IMP_ACCEPT}" data-ch="imp-more" aria-label="합칠 파일 더 선택"></label><button class="btn sm" data-act="imp-cancel">다른 파일</button>`}</div>`;
   const cand = p.base ? [] : p.sheets.map((s, i) => i).filter(i => i === p.si ? partOK(p) : !!(p.sheets[i]._auto && p.sheets[i]._auto.r.units.length));
   if (cand.length > 1) {
     h += `<div class="row"><button class="btn sm" data-act="imp-sh-toggle" aria-expanded="${!!p.shOpen}">${p.shOpen ? '시트 합치기 닫기' : `다른 시트도 합치기 (세대 목록 시트 ${cand.length}개)`}</button><span class="muted" style="font-size:12px;flex:1 1 220px">동·타입·옵션별로 시트가 나뉘어 있으면 골라서 한 단지로 합칩니다.</span></div>`;
     if (p.shOpen) {
       const sel = new Set(p.shSel || []);
-      h += `<div class="oedit">${cand.map(i => `<label class="row"><input type="checkbox" id="shs${i}" data-ch="imp-shsel" value="${i}"${i === p.si || sel.has(i) ? ' checked' : ''}${i === p.si ? ' disabled' : ''}> ${esc(p.sheets[i].name)} <span class="muted num" style="font-size:12px">${fmt((i === p.si ? p.res : p.sheets[i]._auto.r).units.length)}세대</span>${i === p.si ? '<span class="faint" style="font-size:12px">지금 시트</span>' : ''}</label>`).join('')}
+      h += `<div class="oedit">${cand.map(i => `<label class="row"><input type="checkbox" id="shs${i}" data-ch="imp-shsel" value="${i}"${i === p.si || sel.has(i) ? ' checked' : ''}${i === p.si ? ' disabled' : ''}> ${esc(p.sheets[i].name)} <span class="muted num" style="font-size:12px">${fmt((i === p.si ? p.res : p.sheets[i]._auto.r).units.length)}세대</span>${p.sheets[i].hidden ? '<span class="faint" style="font-size:12px">숨김 시트</span>' : ''}${i === p.si ? '<span class="faint" style="font-size:12px">지금 시트</span>' : ''}</label>`).join('')}
         <div class="row"><button class="btn sm pri" data-act="imp-sheets-merge"${sel.size ? '' : ' disabled'}>${sel.size ? `지금 시트와 함께 ${sel.size + 1}개 합치기` : '합칠 시트를 고르세요'}</button><span class="hint">‘전체’ 시트와 동별 시트를 함께 고르면 세대가 겹칩니다. 겹친 세대는 하나로 합치지만, 원본·수정본처럼 내용이 다른 시트는 함께 고르지 마세요.</span></div></div>`;
     }
   }

@@ -69,6 +69,7 @@ h3{font-size:14px;font-weight:600}
 .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;letter-spacing:-.01em;white-space:nowrap}
 .logo{display:grid;grid-template-columns:repeat(3,5px);gap:2px;padding:4px;border:1.5px solid var(--accent);border-radius:3px}
 .logo i{width:5px;height:4px;background:var(--line)} .logo i.on{background:var(--accent)}
+.proj-l{display:none}
 .proj select{min-width:0;max-width:min(320px,62vw);padding:6px 28px 6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);font-weight:600}
 .tabs{display:flex;gap:2px;margin-left:auto;overflow-x:auto;max-width:100%}
 .tabs a{padding:7px 13px;border-radius:6px;color:var(--ink-2);text-decoration:none;font-weight:600;white-space:nowrap}
@@ -289,8 +290,12 @@ a.lnk{font-family:var(--font)}
 @media (max-width:640px){
   .bar-in{flex-wrap:nowrap;gap:8px;padding-block:8px}
   .brand{font-size:0;gap:0}
-  .proj{flex:1 1 auto;min-width:0}
+  .proj{flex:1 1 auto;min-width:0;position:relative}
   .proj select{width:100%;min-width:0}
+  /* 폰: 단지 이름이 길어도 두 줄로 다 보이게 — 실제 선택 칸은 그 위에 투명하게 겹쳐 두고 누르면 원래 목록이 열림 */
+  .proj .proj-l:not(:empty){display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px;line-height:1.25;font-weight:600;padding:5px 26px 5px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);min-height:38px;word-break:keep-all;overflow-wrap:anywhere;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.6' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center}
+  .proj .proj-l:not(:empty)+select{position:absolute;inset:0;opacity:0;height:100%}
   .save{font-size:11px;white-space:nowrap}
   .bar-in .btn.undo{padding-inline:9px;font-size:0;gap:0}
   .bar-in .btn.undo svg{width:16px;height:16px}
@@ -311,7 +316,26 @@ a.lnk{font-family:var(--font)}
 .recent>span{font-size:12px;flex:0 0 auto;margin-right:2px}
 .recent .chip{flex:0 0 auto;font-size:12px;padding:3px 10px;font-family:var(--mono)}
 .swipe-hint{display:none;font-size:12px;color:var(--ink-3);margin:0}
-@media (pointer:coarse){ .swipe-hint{display:block} }
+@media (pointer:coarse){ .swipe-hint{display:block} .kbd-only{display:none} }
+/* 손가락으로 누르는 화면: 자주 누르는 단추·칩·세대 칸을 키움 */
+@media (pointer:coarse){
+  .btn.sm{min-height:34px;padding:5px 11px}
+  .btn.sm.ic{min-width:34px;justify-content:center}
+  .chip{min-height:34px;padding:5px 12px}
+  .recent .chip{min-height:32px}
+  .cond .chip{min-height:30px}
+  .swatch{width:32px;height:32px}
+  .cell{height:30px}
+  .lg{min-height:28px}
+  .bar-in .btn.undo{min-width:44px;min-height:38px;justify-content:center}
+  .elev .flb{min-height:30px;min-width:38px;font-size:12px}
+}
+/* 세대 화면 '고른 것만 보기': 휴대폰에서도 이름과 고른 값을 한 줄에 */
+.olist.compact .choice.sel{white-space:normal}
+@media (max-width:520px){ .olist.compact .orow{grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);align-items:center} }
+@media (max-width:520px){ .stats .stat:last-child:nth-child(odd){flex-basis:100%} }
+.unit-opts-h{display:flex;justify-content:flex-end;padding:6px 0 0}
+.ue-sel{width:100%;max-width:440px}
 .meter{height:8px;border-radius:99px;background:var(--surface-2);overflow:hidden}
 .meter>i{display:block;height:100%;background:var(--accent);border-radius:99px}
 .meter.hi>i{background:var(--danger)}
@@ -398,7 +422,7 @@ a.lnk{font-family:var(--font)}
 .brand .gsl img{height:20px;width:auto;display:block}
 .brand .xil{height:15px;width:auto;display:block}
 .brand .bt{font-size:15px;font-weight:700;letter-spacing:-.01em;color:#fff;padding-left:10px;border-left:1px solid rgba(255,255,255,.28);line-height:18px}
-.proj select{background-color:rgba(255,255,255,.1);border-color:rgba(255,255,255,.25);color:#fff}
+.proj select,.proj .proj-l:not(:empty){background-color:rgba(255,255,255,.1);border-color:rgba(255,255,255,.25);color:#fff}
 .proj select option{color:#16202F;background:#fff}
 .save{color:rgba(255,255,255,.7)}
 .bar .btn.undo{background:transparent;border-color:rgba(255,255,255,.32);color:#fff}
@@ -440,7 +464,7 @@ a.lnk{font-family:var(--font)}
 
 <header class="bar"><div class="wrap bar-in">
   <div class="brand"><span class="gsl"><img src="gs-logo.png" alt="GS건설" width="57" height="20"></span><img class="xil" src="xi-white.png" alt="Xi" width="27" height="15"><span class="bt">옵션 관리</span></div>
-  <label class="proj"><span class="sr">단지 선택</span><select id="projSel" data-ch="proj"><option>불러오는 중…</option></select></label>
+  <label class="proj"><span class="sr">단지 선택</span><span class="proj-l" id="projL" aria-hidden="true"></span><select id="projSel" data-ch="proj"><option>불러오는 중…</option></select></label>
   <span class="save" id="saveState"></span>
   <button class="btn sm undo" id="undoBtn" data-act="undo" disabled title="되돌릴 작업이 없습니다"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a4 4 0 0 1 0 8h-2"/></svg>되돌리기</button>
   <nav class="tabs" aria-label="화면">
@@ -536,7 +560,7 @@ window.__maskDefault = true;   // 폰 분실 대비: 엑셀을 가져올 때 계
 try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(v => { if (window.__localInfo) window.__localInfo.persisted = v; }); } catch (e) {}
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 (() => {
-  const V = '1.4.1', B = '2026-11-25';
+  const V = '1.4.2', B = '2026-11-26';
   if (window.__localInfo) window.__localInfo.about = `앱 버전 ${V} (${B}) · 현장 업무 보조용 개인 제작 도구이며, 회사 공식 시스템이 아닙니다.`;
   try { const pv = localStorage.getItem('aptopt-ver'); if (pv && pv !== V) window.__startupNote = `새 버전(${V})으로 업데이트되었습니다. 저장된 데이터는 그대로입니다.`; localStorage.setItem('aptopt-ver', V); } catch (e) {}
   window.__welcomeHTML = () => `<div class="panel welcome"><div class="wl-logos"><img src="gs-logo.png" alt="GS건설"><i></i><img class="wl-xi" src="xi-navy.png" alt="Xi"></div>
@@ -603,7 +627,7 @@ const S = {
   ready: false, note: '', B: null, canWrite: true, sample: null, downloads: null, user: null, me: null, names: {}, nameAsk: new Set(),
   projects: {}, pid: null, chunks: {}, chunksReady: false, logs: {}, logsReady: false, ver: 0, tab: 'overview', saving: 0, undo: [],
   ov: {dim: 'type', val: 'n', sort: false},
-  uv: {dong: null, key: null, colorBy: 'paid', q: '', edit: false, del: false},
+  uv: {dong: null, key: null, colorBy: 'paid', q: '', edit: false, del: false, allCh: lsGet('apt-opt-allch') === '1'},
   cmp: {sel: new Set(), opts: null, fd: new Set(), ft: new Set(), ff: new Set(), conds: [], fmin: '', fmax: '', diff: false, flip: false, sort: null, forPid: null, bk: {o: '', v: '', confirm: false}},
   hv: {range: 'd30', q: '', open: new Set()},
   mg: {imp: null, delProj: false, newProj: false, delOpt: null, delFlag: null, nfColor: '#FFD43B', nfName: ''}
@@ -726,6 +750,8 @@ function dbBackend(db) {
       S.chunks = {}; S.logs = {}; S.chunksReady = false; S.logsReady = false; S.ver++;
       if (!pid) return;
       const base = 'projects/' + pid + '/chunks', lbase = 'projects/' + pid + '/log';
+      // 세대 자료를 비웠으니 '이미 반영한 문서' 기록도 지운다 (안 지우면 다른 단지에 갔다 돌아올 때 0세대로 보임 — 같은 문서 객체를 다시 주는 저장소)
+      for (const k in seen) if (k.startsWith(base + '/') || k.startsWith(lbase + '/')) delete seen[k];
       unsubs.push(db.collection(base).onSnapshot(snap => {
         if (openPid !== pid) return;
         const ids = new Set(); let changed = !S.chunksReady;
@@ -1810,7 +1836,7 @@ function computeDiff(res, mask) {
     omap[no.id] = {o, no, cmap, nc};
   });
   const matchRate = res.options.length ? (res.options.length - newOpts.length) / res.options.length : 0;
-  const masked = !!mask || namesMasked(), changes = [], added = [], keys = new Set(); let skipped = 0;
+  const masked = !!mask || namesMasked(), changes = [], added = [], keys = new Set(); let skipped = 0, keptFlag = 0;
   // 행 색으로 표시된 자료: 같은 색끼리 맞춰 비교. 새 자료에 없는 색(직접 붙인 표시)은 건드리지 않음
   const fileColors = new Set(res.flagCol ? [] : (res.flags || []).map(f => colorKey(f.color))), projFlags = meta().flags || [];
   res.units.forEach(nu => {
@@ -1828,7 +1854,9 @@ function computeDiff(res, mask) {
     if (res.flagCol) { const nl = nu.f ? ((res.flags.find(x => x.id === nu.f) || {}).label || '') : '', cl = (flagOf(u) || {}).label || ''; if (nk(nl) !== nk(cl)) items.push({kind: 'flag', lab: '색상 표시', from: cl, to: nl}); }
     else if (fileColors.size) {
       const nf = nu.f ? res.flags.find(x => x.id === nu.f) : null, cf = flagOf(u), nc = nf ? colorKey(nf.color) : '', cc = cf ? colorKey(cf.color) : '';
-      if (nc !== cc && (nc || fileColors.has(cc))) { const pf = nf && projFlags.find(x => colorKey(x.color) === nc); items.push({kind: 'flag', lab: '색상 표시', from: cf ? cf.label : '', to: nf ? (pf ? pf.label : nf.label) : '', color: nf ? nf.color : ''}); }
+      // 새 파일은 자기 색(같은 계열)만 바꾸거나 지움. 다른 데서 붙인 표시(현장에서 직접 붙인 것 등)는 그대로 둠 — 한 세대에 표시는 하나뿐이라 덮어쓰면 사라짐
+      if (nc && cc && nc !== cc && !fileColors.has(cc)) keptFlag++;
+      else if (nc !== cc && (nc || fileColors.has(cc))) { const pf = nf && projFlags.find(x => colorKey(x.color) === nc); items.push({kind: 'flag', lab: '색상 표시', from: cf ? cf.label : '', to: nf ? (pf ? pf.label : nf.label) : '', color: nf ? nf.color : ''}); }
     }
     [['t', '타입'], ['n', '계약자'], ['cd', '계약일'], ['od', '옵션계약일'], ['m', '메모']].forEach(([f, lab]) => {
       let nv = nu[f] || ''; if (!nv) return; if (f === 'n' && masked) nv = maskName(nv);
@@ -1837,7 +1865,7 @@ function computeDiff(res, mask) {
     if (nu.c != null && nu.c !== u.c) items.push({kind: 'field', f: 'c', lab: '옵션계약', from: cText(u.c), to: cText(nu.c), val: nu.c});
     if (items.length) changes.push({key: k, nu, items});
   });
-  return {omap, newOpts, newCh, matchRate, changes, added, missing: list.filter(u => !keys.has(ukey(u))), skipped, masked};
+  return {omap, newOpts, newCh, matchRate, changes, added, missing: list.filter(u => !keys.has(ukey(u))), skipped, keptFlag, masked};
 }
 function getDiff(imp) {
   const key = S.pid + '|' + S.ver + '|' + (imp.mask ? 1 : 0);
@@ -1862,6 +1890,7 @@ function diffView(df, imp) {
   if (df.newOpts.length) h += `<label class="row"><input type="checkbox" id="diffNewOpts" data-ch="diff-newopts"${imp.addOpts !== false ? ' checked' : ''}> 새 옵션도 추가: ${esc(df.newOpts.map(o => o.name).join(', '))}</label>`;
   if (df.newCh.length) h += `<p class="hint">새 선택지 ${esc(df.newCh.map(x => shortName(x.o.name) + ' ' + x.c.name).join(', '))}은(는) 반영할 때 옵션 구성에 함께 추가됩니다.</p>`;
   if (df.skipped) h += `<p class="hint">새 자료에 표시가 없는 옵션 값 ${fmt(df.skipped)}건은 지금 값을 그대로 둡니다.</p>`;
+  if (df.keptFlag) h += `<p class="hint">이미 다른 색상 표시가 붙어 있는 ${fmt(df.keptFlag)}세대는 그 표시를 그대로 둡니다 (한 세대에 표시는 하나).</p>`;
   if (rows.length) {
     h += `<div class="scroll-x" data-scroll="diff" style="max-height:300px;overflow-y:auto;border:1px solid var(--line-2);border-radius:6px"><table class="grid"><thead><tr><th class="stick">세대</th><th>항목</th><th>지금</th><th>새 자료</th></tr></thead><tbody>${rows.slice(0, 400).map(r => `<tr><th class="stick mono">${esc(r[0])}</th><td style="text-align:left">${esc(r[1])}</td><td style="text-align:left;color:var(--ink-2)">${esc(r[2] || '—')}</td><td style="text-align:left;font-weight:600">${esc(r[3] || '—')}</td></tr>`).join('')}</tbody></table></div>${rows.length > 400 ? `<p class="hint">외 ${fmt(rows.length - 400)}건</p>` : ''}`;
     h += `<div class="row"><button class="btn pri" data-act="diff-apply">${nCh ? `바뀐 ${fmt(nCh)}건` : ''}${nCh && df.added.length ? ' · ' : ''}${df.added.length ? `새 세대 ${fmt(df.added.length)}` : ''} 반영</button><span class="hint">반영한 내용은 변경 이력에 남고 바로 되돌릴 수 있습니다.</span></div>`;
@@ -2116,7 +2145,7 @@ function vUnits() {
   if (WO) {
     const Lw = wList(us, WO, uv.wc), c = wCount(Lw), r = c.all ? Math.round(c.done / c.all * 100) : 0, all = wCount(wList(list, WO, uv.wc)), paidCh = WO.choices.filter(x => x.id !== baseId(WO));
     workCtl = `<label class="field" style="max-width:420px">작업 항목<select id="uvWork" data-ch="uv-work">${O.map(o => `<option value="${esc(o.id)}"${o.id === WO.id ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select></label>
-      ${paidCh.length > 1 ? `<div class="row" role="group" aria-label="선택지"><button class="chip" data-act="uv-wc" data-v="" aria-pressed="${!uv.wc}">유상 전체</button>${paidCh.map(x => `<button class="chip" data-act="uv-wc" data-v="${esc(x.id)}" aria-pressed="${uv.wc === x.id}">${esc(x.name)}</button>`).join('')}</div>` : ''}
+      ${paidCh.length > 1 ? `<div class="row" role="group" aria-label="선택지"><button class="chip" data-act="uv-wc" data-v="" aria-pressed="${!uv.wc}">유상 전체</button>${paidCh.map(x => `<button class="chip" data-act="uv-wc" data-v="${esc(x.id)}" aria-pressed="${uv.wc === x.id}" title="${esc(x.name)}">${esc(chLabel(WO, x))}</button>`).join('')}</div>` : ''}
       <div><div class="meter ok" role="img" aria-label="${r}% 완료"><i style="width:${Math.max(r, 1)}%"></i></div><div class="wsum num" style="margin-top:6px"><span>${esc(dLabel(uv.dong))} 대상<b>${c.all}</b></span><span class="wd">완료<b>${c.done}</b> (${r}%)</span><span class="wt">남음<b>${c.todo}</b></span>${c.redo ? `<span class="wr">재시공<b>${c.redo}</b></span>` : ''}${(() => { const td = Lw.filter(([x, st]) => st === 'done' && (wGet(x, WO.id) || {}).t === today()).length; return td ? `<span class="wd">오늘 +${td}</span>` : ''; })()}<span class="faint">전체 동 ${all.done}/${all.all}</span></div></div>
       <div class="row"><label class="row" style="gap:6px;font-size:13px"><input type="checkbox" id="uvQuick" data-ch="uv-quick"${uv.quick ? ' checked' : ''}> 빠른 체크 (누르면 바로 완료·취소)</label><span class="faint" style="font-size:12px">층 이름(예: 9F)을 누르면 그 층 남은 세대를 한 번에 완료</span></div>
       <div class="row"><button class="btn sm" data-act="w-share" data-v="left">남은 세대 공유</button><button class="btn sm" data-act="w-share" data-v="all">전체 목록 공유</button>${S.downloads ? `<button class="btn sm" data-act="x-work">시공 현황 엑셀</button>` : ''}</div>`;
@@ -2126,7 +2155,7 @@ function vUnits() {
     <div class="row" role="group" aria-label="동 선택">${D.map(d => `<button class="chip" data-act="uv-dong" data-v="${esc(d)}" aria-pressed="${d === uv.dong}">${esc(dLabel(d))}</button>`).join('')}</div>
     ${workCtl}<label class="field" style="max-width:340px${WO ? ';display:none' : ''}">색 기준<select id="uvColor" data-ch="uv-color"><option value="paid"${uv.colorBy === 'paid' ? ' selected' : ''}>유상옵션 개수</option>${condActive() ? `<option value="cond"${uv.colorBy === 'cond' ? ' selected' : ''}>비교 화면 조건에 맞는 세대</option>` : ''}${flags.length ? `<option value="flag"${uv.colorBy === 'flag' ? ' selected' : ''}>색상 표시</option>` : ''}<optgroup label="옵션별 선택">${O.map(o => `<option value="${esc(o.id)}"${uv.colorBy === o.id ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</optgroup></select></label>
     <div class="legend">${legend}</div><div class="scroll-x" data-scroll="elev">${elev}</div>
-    <p class="hint">${WO ? (uv.quick ? '빠른 체크: 칸을 누르면 바로 완료/취소됩니다. 재시공 칸은 눌러서 내용을 확인하세요. 잘못 눌렀으면 되돌리기.' : '칸을 누르면 완료·재시공·메모·현장 사진을 남깁니다. 완료 뒤 옵션이 바뀐 세대는 자동으로 빨간색(재시공)이 됩니다.') : '방향키(↑↓←→)로 옆·위아래 세대로 옮겨 갑니다. 점선 칸은 이 자료에 없는 세대입니다.'}</p></div></section>`;
+    <p class="hint">${WO ? (uv.quick ? '빠른 체크: 칸을 누르면 바로 완료/취소됩니다. 재시공 칸은 눌러서 내용을 확인하세요. 잘못 눌렀으면 되돌리기.' : '칸을 누르면 완료·재시공·메모·현장 사진을 남깁니다. 완료 뒤 옵션이 바뀐 세대는 자동으로 빨간색(재시공)이 됩니다.') : '<span class="kbd-only">방향키(↑↓←→)로 옆·위아래 세대로 옮겨 갑니다. </span>점선 칸은 이 자료에 없는 세대입니다.'}</p></div></section>`;
   const f = flagOf(u), inCmp = S.cmp.sel.has(uv.key), idx = us.indexOf(u), pc = paidCount(u);
   h += `<section class="panel detail"><div class="panel-b" style="display:flex;flex-direction:column;gap:10px"><div class="unit-h"><span class="row" style="gap:6px;align-items:center"><button class="btn sm ic" data-act="unit-step" data-v="-1" aria-label="이전 세대"${idx > 0 ? '' : ' disabled'}>‹</button><span class="no">${esc(u.d)}<span class="faint">동</span> ${esc(u.h)}<span class="faint">호</span></span><button class="btn sm ic" data-act="unit-step" data-v="1" aria-label="다음 세대"${idx < us.length - 1 ? '' : ' disabled'}>›</button></span>${u.t ? `<span class="tag">${esc(u.t)}</span>` : ''}${pc ? `<span class="pill k1 num">유상 ${pc}개</span>` : `<span class="pill k0">유상 없음</span>`}${u.c === 0 ? `<span class="tag">옵션계약 미체결</span>` : ''}${f ? `<span class="tag"><span class="flag" style="background:${safeColor(f.color)}"></span>${esc(f.label)}</span>` : ''}<span class="row" style="margin-left:auto"><button class="btn sm" data-act="unit-share" title="이 세대 옵션을 카톡·문자로 보내거나 복사">공유</button><button class="btn sm${inCmp ? '' : ' pri'}" data-act="cmp-toggle" data-key="${esc(uv.key)}">${inCmp ? '비교에서 빼기' : '비교에 담기'}</button>${S.canWrite ? `<button class="btn sm" data-act="uv-edit">${uv.edit ? '수정 마치기' : '수정'}</button>` : ''}</span></div>`;
   if (uv.edit) {
@@ -2134,21 +2163,22 @@ function vUnits() {
   } else {
     const kv = []; if (u.n) kv.push(`계약자 <b>${esc(u.n)}</b>`); if (u.cd) kv.push(`계약일 <b class="num">${esc(u.cd)}</b>`); if (u.od) kv.push(`옵션계약일 <b class="num">${esc(u.od)}</b>`);
     kv.push(`적용 옵션 <b class="num">${O.filter(o => sel(u, o) != null).length}</b>개`);
-    h += `<div class="kv">${kv.map(x => `<span>${x}</span>`).join('')}</div>${u.m ? `<p class="muted">메모: ${esc(u.m)}</p>` : ''}<p class="swipe-hint">좌우로 밀면 이전·다음 세대로 넘어갑니다.</p>`;
+    h += `<div class="kv">${kv.map(x => `<span>${x}</span>`).join('')}</div>${u.m && !(f && norm(f.label) === norm(u.m)) ? `<p class="muted">메모: ${esc(u.m)}</p>` : ''}<p class="swipe-hint">좌우로 밀면 이전·다음 세대로 넘어갑니다.</p>`;
     const br = unitBroken(u); if (br.length) h += `<div class="warnbox"><b>연계 규칙 위반</b><ul>${br.map(r => `<li>${esc(ruleText(r))}</li>`).join('')}</ul></div>`;
   }
-  h += `</div><div class="panel-b" style="border-top:1px solid var(--line-2);padding-top:4px"><div class="olist">`;
+  const allCh = uv.edit || S.uv.allCh;   // 보기 화면은 기본으로 '고른 것만' — 선택지가 많은 옵션도 한 줄
+  h += `</div><div class="panel-b" style="border-top:1px solid var(--line-2);padding-top:4px">${uv.edit ? '' : `<div class="unit-opts-h"><button class="lnk" data-act="uv-allch" aria-pressed="${!!S.uv.allCh}">${S.uv.allCh ? '고른 것만 보기' : '모든 선택지 보기'}</button></div>`}<div class="olist${allCh ? '' : ' compact'}">`;
   const na = [];
   O.forEach(o => {
     const c = sel(u, o);
-    if (uv.edit) { h += `<div class="orow"><div class="on">${nameHTML(o.name)}</div><div><select class="inp" id="ue-${esc(o.id)}" data-ch="ue-opt" data-o="${esc(o.id)}"><option value="">해당 없음</option>${o.choices.map(x => `<option value="${esc(x.id)}"${x.id === c ? ' selected' : ''}>${esc(x.name)}${x.id === baseId(o) ? ' (기본)' : ''}</option>`).join('')}</select></div></div>`; return; }
+    if (uv.edit) { h += `<div class="orow"><div class="on">${nameHTML(o.name)}</div><div><select class="inp ue-sel" id="ue-${esc(o.id)}" data-ch="ue-opt" data-o="${esc(o.id)}"><option value="">해당 없음</option>${o.choices.map(x => `<option value="${esc(x.id)}"${x.id === c ? ' selected' : ''}>${esc(x.name)}${x.id === baseId(o) ? ' (기본)' : ''}</option>`).join('')}</select></div></div>`; return; }
     if (c == null) { na.push(o.name); return; }
     const prev = u.p && u.p[o.id];
     let th = '';
     if (hasImgs(o)) { const cc = o.choices.find(x => x.id === c), n = o.choices.filter(x => x.img).length; th = cc && cc.img ? `<button class="othumb" data-act="img-view" data-o="${esc(o.id)}" data-c="${esc(cc.id)}" data-sel="${esc(c)}" title="${esc(cc.name)} 사진 크게 보기">${imgTag(cc.img, true, cc.name)}${n > 1 ? `<span class="tag">${n}</span>` : ''}</button>` : `<button class="othumb more" data-act="img-view" data-o="${esc(o.id)}" data-c="" data-sel="${esc(c)}" title="다른 선택지 사진 보기">사진 ${n}</button>`; }
     const wst = wStat(u, o), ww = wGet(u, o.id);
     const wchip = wst && (ww || uv.mode === 'work') ? `<button class="wchip st-${wst}" data-act="ws-open" data-key="${esc(uv.key)}" data-o="${esc(o.id)}" title="${esc(wWhy(u, o) || '시공 상태 바꾸기')}">시공 ${W_TXT[wst]}${ww && ww.t && wst === 'done' ? ' · ' + esc(ww.t.slice(5)) : ''}${ww && ww.ph && ww.ph.length ? ' · 사진 ' + ww.ph.length : ''}</button>` : '';
-    h += `<div class="orow"><div class="on">${nameHTML(o.name)}</div><div><div class="ocell"><div class="choices">${o.choices.map(x => x.id === c ? `<span class="choice sel k${kOf(o, x.id)}">${chHTML(x.name)}</span>` : `<span class="choice" title="${esc(x.name)}">${esc(chLabel(o, x))}</span>`).join('')}</div>${th}</div>${prev ? `<div class="prev">변경 전: ${esc(chName(o, prev))}</div>` : ''}${wchip}${ww && ww.m ? `<div class="wmemo">메모: ${esc(ww.m)}</div>` : ''}</div></div>`;
+    h += `<div class="orow"><div class="on">${nameHTML(o.name)}</div><div><div class="ocell"><div class="choices">${o.choices.filter(x => allCh || x.id === c).map(x => x.id === c ? `<span class="choice sel k${kOf(o, x.id)}">${chHTML(x.name)}</span>` : `<span class="choice" title="${esc(x.name)}">${esc(chLabel(o, x))}</span>`).join('')}</div>${th}</div>${prev ? `<div class="prev">변경 전: ${esc(chName(o, prev))}</div>` : ''}${wchip}${ww && ww.m ? `<div class="wmemo">메모: ${esc(ww.m)}</div>` : ''}</div></div>`;
   });
   h += `</div>${na.length ? `<p class="faint" style="font-size:12px;padding:10px 0 4px;border-top:1px solid var(--line-2)">이 세대에 해당 없는 옵션: ${esc(na.join(' · '))}</p>` : ''}`;
   if (uv.edit) h += `<div class="row" style="padding-top:10px;border-top:1px solid var(--line-2)">${uv.del ? `<span class="err">이 세대를 삭제할까요?</span><button class="btn sm danger" data-act="unit-del-yes">삭제</button><button class="btn sm" data-act="unit-del-no">취소</button>` : `<button class="btn sm danger" data-act="unit-del">세대 삭제</button>`}</div>`;
@@ -2162,8 +2192,9 @@ function cmpInit() {
   const c = S.cmp; if (c.forPid === S.pid && c.opts) return;
   const D = dongs(), U = units().list; c.forPid = S.pid; c.opts = new Set(opts().map(o => o.id));
   c.fd = new Set(D.slice(0, 1)); c.ft = new Set(); c.fmin = ''; c.fmax = '';
-  if (!c.sel.size) U.filter(u => u.d === D[0]).forEach(u => c.sel.add(ukey(u)));
+  if (!c.sel.size) { U.filter(u => u.d === D[0]).forEach(u => c.sel.add(ukey(u))); c.autoKey = selKey(c.sel); }   // 빈 화면 대신 첫 동을 보여 줌 (직접 고른 게 아니라 탭 숫자엔 안 셈)
 }
+const selKey = s => [...s].sort().join(',');
 function cmpCandidates() {
   const c = S.cmp, lo = c.fmin === '' ? -Infinity : +c.fmin, hi = c.fmax === '' ? Infinity : +c.fmax;
   return units().list.filter(u => (!c.fd.size || c.fd.has(u.d)) && (!c.ft.size || c.ft.has(u.t)) && ((lo === -Infinity && hi === Infinity) || (/^\d+$/.test(u.h) && Math.floor(+u.h / 100) >= lo && Math.floor(+u.h / 100) <= hi)) && condOk(u));
@@ -2373,7 +2404,7 @@ function vManage() {
     opts().forEach((o, i) => {
       const b = baseId(o), at = applyTypes(o);
       h += `<div class="oedit"><div class="row"><input class="inp" style="flex:1;font-weight:600" id="on-${esc(o.id)}" data-ch="opt-name" data-o="${esc(o.id)}" value="${esc(o.name)}" maxlength="80" aria-label="옵션 이름"><button class="btn sm" data-act="opt-up" data-o="${esc(o.id)}"${i ? '' : ' disabled'} aria-label="위로">↑</button><button class="btn sm" data-act="opt-down" data-o="${esc(o.id)}"${i < opts().length - 1 ? '' : ' disabled'} aria-label="아래로">↓</button>${S.mg.delOpt === o.id ? `<button class="btn sm danger" data-act="opt-del-yes" data-o="${esc(o.id)}">삭제 확인</button><button class="btn sm" data-act="opt-del-no">취소</button>` : `<button class="btn sm danger" data-act="opt-del" data-o="${esc(o.id)}">삭제</button>`}</div>`;
-      o.choices.forEach(c => { h += `<div class="ch"><label class="row" title="기본 사양으로 지정"><input type="radio" name="base-${esc(o.id)}" id="bs-${esc(o.id)}-${esc(c.id)}" data-ch="ch-base" data-o="${esc(o.id)}" data-c="${esc(c.id)}"${c.id === b ? ' checked' : ''}><span class="faint" style="font-size:12px">기본</span></label><input type="text" class="inp" id="cn-${esc(o.id)}-${esc(c.id)}" data-ch="ch-name" data-o="${esc(o.id)}" data-c="${esc(c.id)}" value="${esc(c.name)}" maxlength="80" aria-label="선택지 이름">${imgStore() ? (c.img ? `<button class="cthumb" data-act="img-view" data-o="${esc(o.id)}" data-c="${esc(c.id)}" title="사진 크게 보기">${imgTag(c.img, true, c.name)}</button><label class="btn sm img-add" title="사진 바꾸기">바꾸기<input type="file" accept="image/*" data-ch="img-file" data-o="${esc(o.id)}" data-c="${esc(c.id)}" aria-label="${esc(c.name)} 사진 바꾸기"></label><button class="btn sm" data-act="img-del" data-o="${esc(o.id)}" data-c="${esc(c.id)}" aria-label="${esc(c.name)} 사진 빼기">빼기</button>` : `<label class="btn sm img-add" title="이 선택지 사진 넣기">사진<input type="file" accept="image/*" data-ch="img-file" data-o="${esc(o.id)}" data-c="${esc(c.id)}" aria-label="${esc(c.name)} 사진 넣기"></label>`) : ''}<button class="btn sm" data-act="ch-del" data-o="${esc(o.id)}" data-c="${esc(c.id)}"${o.choices.length > 1 ? '' : ' disabled'} aria-label="선택지 삭제">×</button></div>`; });
+      o.choices.forEach(c => { h += `<div class="ch"><label class="row" title="기본 사양으로 지정" style="min-width:54px;flex:none"><input type="radio" name="base-${esc(o.id)}" id="bs-${esc(o.id)}-${esc(c.id)}" data-ch="ch-base" data-o="${esc(o.id)}" data-c="${esc(c.id)}"${c.id === b ? ' checked' : ''}>${c.id === b ? '<span style="font-size:12px;font-weight:600;color:var(--accent)">기본</span>' : '<span class="sr">기본으로 지정</span>'}</label><input type="text" class="inp" id="cn-${esc(o.id)}-${esc(c.id)}" data-ch="ch-name" data-o="${esc(o.id)}" data-c="${esc(c.id)}" value="${esc(c.name)}" maxlength="80" aria-label="선택지 이름">${imgStore() ? (c.img ? `<button class="cthumb" data-act="img-view" data-o="${esc(o.id)}" data-c="${esc(c.id)}" title="사진 크게 보기">${imgTag(c.img, true, c.name)}</button><label class="btn sm img-add" title="사진 바꾸기">바꾸기<input type="file" accept="image/*" data-ch="img-file" data-o="${esc(o.id)}" data-c="${esc(c.id)}" aria-label="${esc(c.name)} 사진 바꾸기"></label><button class="btn sm" data-act="img-del" data-o="${esc(o.id)}" data-c="${esc(c.id)}" aria-label="${esc(c.name)} 사진 빼기">빼기</button>` : `<label class="btn sm img-add" title="이 선택지 사진 넣기">사진<input type="file" accept="image/*" data-ch="img-file" data-o="${esc(o.id)}" data-c="${esc(c.id)}" aria-label="${esc(c.name)} 사진 넣기"></label>`) : ''}<button class="btn sm" data-act="ch-del" data-o="${esc(o.id)}" data-c="${esc(c.id)}"${o.choices.length > 1 ? '' : ' disabled'} aria-label="선택지 삭제">×</button></div>`; });
       h += `<div class="row"><button class="btn sm" data-act="ch-add" data-o="${esc(o.id)}">선택지 추가</button>${at.length ? `<span class="faint" style="font-size:12px">적용 타입: ${esc(at.join(', '))}</span>` : ''}</div></div>`;
     });
     h += `</div></section>`;
@@ -2392,7 +2423,7 @@ function histGroups() {
 function vHistory() {
   const hv = S.hv, gs = histGroups(), total = Object.keys(S.logs).length, nItems = gs.reduce((n, d) => n + (d.items || []).length, 0);
   askNames(gs.slice(0, 200).map(d => d.by).filter(Boolean));
-  let h = `<section class="panel"><div class="panel-h"><h2>변경 이력</h2><span class="muted num">${fmt(gs.length)}건 작업 · ${fmt(nItems)}개 항목</span><div class="row sp"><div class="row" role="group" aria-label="기간">${[['d1', '오늘'], ['d7', '7일'], ['d30', '30일'], ['all', '전체']].map(([k, l]) => `<button class="chip" data-act="hist-range" data-v="${k}" aria-pressed="${hv.range === k}">${l}</button>`).join('')}</div>${S.downloads && gs.length ? `<button class="btn sm" data-act="x-hist">엑셀로 저장</button>` : ''}</div></div>
+  let h = `<section class="panel"><div class="panel-h"><h2>변경 이력</h2><span class="muted num">${fmt(gs.length)}건 작업${nItems ? ` · ${fmt(nItems)}개 항목` : ''}</span><div class="row sp"><div class="row" role="group" aria-label="기간">${[['d1', '오늘'], ['d7', '7일'], ['d30', '30일'], ['all', '전체']].map(([k, l]) => `<button class="chip" data-act="hist-range" data-v="${k}" aria-pressed="${hv.range === k}">${l}</button>`).join('')}</div>${S.downloads && gs.length ? `<button class="btn sm" data-act="x-hist">엑셀로 저장</button>` : ''}</div></div>
   <div class="panel-b" style="display:flex;flex-direction:column;gap:12px"><label class="field" style="max-width:380px">이력 검색<input id="hq" type="search" data-ch="hist-q" placeholder="세대(106-1502), 옵션 이름, 값" value="${esc(hv.q)}" enterkeyhint="search"></label>`;
   if (!S.logsReady) h += `<p class="muted">이력을 불러오는 중입니다…</p>`;
   else if (!total) h += `<div class="empty"><h2>아직 기록된 변경이 없습니다</h2><p>세대 수정, 한꺼번에 바꾸기, 새 자료 반영, 옵션 설정 변경이 여기에 차례로 남습니다.<br>잘못 바꾼 내용은 위쪽 ‘되돌리기’로 바로 취소할 수 있습니다.</p></div>`;
@@ -2414,12 +2445,15 @@ function vHistory() {
 /* ───────── render ───────── */
 function renderHead() {
   const psel = document.getElementById('projSel'), ids = Object.keys(S.projects).sort((a, b) => nat(S.projects[a].createdAt || '', S.projects[b].createdAt || ''));
-  psel.innerHTML = ids.length ? ids.map(id => `<option value="${esc(id)}"${id === S.pid ? ' selected' : ''}>${esc(S.projects[id].name || '이름 없는 단지')}</option>`).join('') : `<option>${S.ready ? '단지 없음' : '불러오는 중…'}</option>`;
+  const pshort = n => n.length > 22 ? n.slice(0, 12).trimEnd() + '…' + n.slice(-8).trimStart() : n;   // '상인센트럴자이 조합 유상…역_260522'
+  psel.innerHTML = ids.length ? ids.map(id => { const n = S.projects[id].name || '이름 없는 단지'; return `<option value="${esc(id)}"${id === S.pid ? ' selected' : ''} title="${esc(n)}">${esc(pshort(n))}</option>`; }).join('') : `<option>${S.ready ? '단지 없음' : '불러오는 중…'}</option>`;
+  psel.title = S.pid && S.projects[S.pid] ? S.projects[S.pid].name || '' : '';
+  const pl = document.getElementById('projL'); if (pl) pl.textContent = ids.length && S.pid && S.projects[S.pid] ? (S.projects[S.pid].name || '이름 없는 단지') : '';
   psel.disabled = !ids.length;
   document.querySelectorAll('.tabs a').forEach(a => { if (a.dataset.tab === S.tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   const ub = document.getElementById('undoBtn'), last = S.undo[S.undo.length - 1];
   if (ub) { ub.hidden = !S.canWrite || !S.pid; ub.disabled = !last; ub.title = last ? '되돌리기: ' + last.label + ' (Ctrl+Z)' : '되돌릴 작업이 없습니다'; }
-  const bd = document.getElementById('cmpBadge'), n = S.pid && S.cmp.forPid === S.pid ? S.cmp.sel.size : 0;
+  const bd = document.getElementById('cmpBadge'), n = S.pid && S.cmp.forPid === S.pid && selKey(S.cmp.sel) !== S.cmp.autoKey ? S.cmp.sel.size : 0;
   if (bd) { bd.hidden = !n; bd.textContent = n > 999 ? '999+' : String(n); }
   let dl = document.getElementById('unitList'); if (!dl) { dl = document.createElement('datalist'); dl.id = 'unitList'; document.body.appendChild(dl); }
   const dv = S.pid + ':' + S.ver; if (S._dlv !== dv) { S._dlv = dv; dl.innerHTML = units().list.map(u => `<option value="${esc(u.d + '-' + u.h)}">${esc([u.t, u.n].filter(Boolean).join(' · '))}</option>`).join(''); }
@@ -2731,6 +2765,7 @@ document.addEventListener('click', e => {
     case 'uv-dong': S.uv.dong = v; S.uv.key = null; S.uv.edit = false; S.uv.del = false; break;
     case 'unit': { const u = units().map.get(t.dataset.key); if (u) { S.uv.dong = u.d; S.uv.key = t.dataset.key; S.uv.del = false; S.uv.reveal = true; pushRecent(t.dataset.key); } break; }
     case 'uv-edit': S.uv.edit = !S.uv.edit; S.uv.del = false; break;
+    case 'uv-allch': S.uv.allCh = !S.uv.allCh; lsSet('apt-opt-allch', S.uv.allCh ? '1' : '0'); break;
     case 'unit-del': S.uv.del = true; break;
     case 'unit-del-no': S.uv.del = false; break;
     case 'unit-del-yes': { const u = unitNow(); if (!u) break; const key = ukey(u); mutate(`${key} 세대 삭제`, (touch, items) => { touch(u._c); const ch = S.chunks[u._c]; ch.units = ch.units.filter(x => x !== u); if (!ch.units.length) delete S.chunks[u._c]; items.push([key, '세대', '있음', '삭제']); }, {src: 'del'}); c.sel.delete(key); S.uv.key = null; S.uv.edit = false; S.uv.del = false; render(); toast('세대를 삭제했습니다.', true); return; }
@@ -2930,6 +2965,7 @@ document.addEventListener('dragover', e => { const d = dropEl(); if (d) { e.prev
 document.addEventListener('dragleave', () => { const d = dropEl(); if (d) d.classList.remove('over'); });
 document.addEventListener('drop', e => { const d = dropEl(); if (!d) return; e.preventDefault(); d.classList.remove('over'); const fs = [...((e.dataTransfer && e.dataTransfer.files) || [])]; if (!fs.length) return; if (d.id === 'dropMore') loadImports(fs, S.mg.imp); else loadImports(fs); });
 window.addEventListener('hashchange', route);
+document.addEventListener('click', e => { const a = e.target.closest && e.target.closest('.tabs a[data-tab]'); if (a && a.dataset.tab === S.tab && window.scrollY > 40) { e.preventDefault(); window.scrollTo({top: 0, behavior: 'smooth'}); } });
 document.addEventListener('keydown', e => {
   const tag = (e.target.tagName || '').toLowerCase(), typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
   if (e.key === 'Escape' && S.ws && !document.getElementById('lb')) { e.preventDefault(); S.ws = null; render(); return; }

@@ -415,6 +415,12 @@ a.lnk{font-family:var(--font)}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--accent:#4BBAE6;--accent-ink:#9CDDF5;--accent-soft:#103247;--on-accent:#06202E;--hover:rgba(75,186,230,.1)}}
 :root[data-theme="dark"]{--accent:#4BBAE6;--accent-ink:#9CDDF5;--accent-soft:#103247;--on-accent:#06202E;--hover:rgba(75,186,230,.1)}
 .bar{top:0;padding-top:env(safe-area-inset-top,0px);background:var(--xi-deep);border-bottom:0;color:#fff;box-shadow:0 1px 0 rgba(0,0,0,.08)}
+/* 아이폰 상태 표시줄(시간·배터리) 자리: 머리글과 같은 남색. 밝은 띠가 남아 있으면 iOS가 그 띠를 남색 머리글 위로 번지게 그려 하얀 잔상처럼 보였음 */
+body::before{background:var(--xi-deep)}
+/* 화면을 아래로 당겨 튕길 때 머리글 위로 밝은 틈이 보이지 않게, 머리글 색을 위쪽으로 이어 둠 (페이지 바닥 쪽은 그대로 밝게) */
+.bar::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:100vh;background:inherit;pointer-events:none}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) body::before{background:#0B1F2E}}
+:root[data-theme="dark"] body::before{background:#0B1F2E}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .bar{background:#0B1F2E;box-shadow:0 1px 0 #1C3346}}
 :root[data-theme="dark"] .bar{background:#0B1F2E;box-shadow:0 1px 0 #1C3346}
 .brand{gap:10px;color:#fff}
@@ -560,7 +566,7 @@ window.__maskDefault = true;   // 폰 분실 대비: 엑셀을 가져올 때 계
 try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(v => { if (window.__localInfo) window.__localInfo.persisted = v; }); } catch (e) {}
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 (() => {
-  const V = '1.4.2', B = '2026-11-26';
+  const V = '1.4.3', B = '2026-11-26';
   if (window.__localInfo) window.__localInfo.about = `앱 버전 ${V} (${B}) · 현장 업무 보조용 개인 제작 도구이며, 회사 공식 시스템이 아닙니다.`;
   try { const pv = localStorage.getItem('aptopt-ver'); if (pv && pv !== V) window.__startupNote = `새 버전(${V})으로 업데이트되었습니다. 저장된 데이터는 그대로입니다.`; localStorage.setItem('aptopt-ver', V); } catch (e) {}
   window.__welcomeHTML = () => `<div class="panel welcome"><div class="wl-logos"><img src="gs-logo.png" alt="GS건설"><i></i><img class="wl-xi" src="xi-navy.png" alt="Xi"></div>

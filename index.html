@@ -566,7 +566,7 @@ window.__maskDefault = true;   // 폰 분실 대비: 엑셀을 가져올 때 계
 try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(v => { if (window.__localInfo) window.__localInfo.persisted = v; }); } catch (e) {}
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 (() => {
-  const V = '1.4.3', B = '2026-11-26';
+  const V = '1.4.4', B = '2026-11-26';
   if (window.__localInfo) window.__localInfo.about = `앱 버전 ${V} (${B}) · 현장 업무 보조용 개인 제작 도구이며, 회사 공식 시스템이 아닙니다.`;
   try { const pv = localStorage.getItem('aptopt-ver'); if (pv && pv !== V) window.__startupNote = `새 버전(${V})으로 업데이트되었습니다. 저장된 데이터는 그대로입니다.`; localStorage.setItem('aptopt-ver', V); } catch (e) {}
   window.__welcomeHTML = () => `<div class="panel welcome"><div class="wl-logos"><img src="gs-logo.png" alt="GS건설"><i></i><img class="wl-xi" src="xi-navy.png" alt="Xi"></div>
@@ -750,6 +750,15 @@ function dbBackend(db) {
         S.ready = true;
         if (changed) { pickProject(); render(); } else setSaving();
       }, () => { clearTimeout(t); S.ready = true; S.note = '저장소를 읽지 못했습니다. 페이지를 다시 열어 주세요.'; render(); });
+    },
+    // 열려 있지 않은 단지의 세대 자료를 한 번만 읽어 옴 (모든 단지 백업용)
+    readUnits(pid) {
+      return new Promise((res, rej) => {
+        let un = null, done = false;
+        const fin = (f, v) => { if (done) return; done = true; setTimeout(() => { try { un && un(); } catch (e) {} }, 0); f(v); };
+        un = db.collection('projects/' + pid + '/chunks').onSnapshot(snap => { const list = []; snap.docs.forEach(d => { const b = d.data() || {}; (b.units || []).forEach(u => list.push(Object.assign(clone(u), {d: String(b.dong)}))); }); fin(res, list); }, e => fin(rej, e || new Error('read failed')));
+        setTimeout(() => fin(rej, new Error('timeout')), 20000);
+      });
     },
     open(pid) {
       unsubs.forEach(f => { try { f(); } catch (e) {} }); unsubs = []; openPid = pid;
@@ -1749,7 +1758,13 @@ function putUnits(list) {
   const by = new Map(); list.forEach(u => { if (!by.has(u.d)) by.set(u.d, []); by.get(u.d).push(u); });
   for (const [d, arr] of by) for (let i = 0; i < arr.length; i += 400) { const cid = newId('c'); S.chunks[cid] = {dong: d, units: arr.slice(i, i + 400).map(u => Object.assign(u, {_c: cid}))}; saveChunk(cid); }
 }
-async function importBackup(j) {
+async function importBackup(j, quiet) {
+  if (j && j.format === 'apt-options-bundle' && Array.isArray(j.projects)) {   // 모든 단지 백업: 단지마다 차례로 복원
+    const ok = j.projects.filter(x => x && x.format === 'apt-options-backup' && x.meta && Array.isArray(x.units));
+    if (!ok.length) throw new Error('백업 파일 안에 단지가 없습니다.');
+    let nu = 0; for (const x of ok) { await importBackup(x, true); nu += x.units.length; }
+    toast(`단지 ${ok.length}개 · ${fmt(nu)}세대를 백업에서 복원했습니다.`); return;
+  }
   if (!j || j.format !== 'apt-options-backup' || !j.meta || !Array.isArray(j.units)) throw new Error('이 사이트에서 저장한 백업 파일이 아닙니다.');
   let nImg = 0; const pid = newId('p');
   if (j.images && typeof j.images === 'object' && imgStore()) {   // 백업에 든 옵션 사진부터 이 기기에 저장
@@ -1762,9 +1777,29 @@ async function importBackup(j) {
   S.projects[pid] = m; switchProject(pid); S.chunksReady = true; S.B.sync(metaPath(pid), clone(m));
   putUnits(j.units.filter(u => u && u.d != null && u.h != null).map(u => Object.assign({s: {}}, u, {d: String(u.d), h: String(u.h)})));
   logAction(`백업에서 복원 · ${fmt(j.units.length)}세대`, 'import', []);
-  S.mg.imp = null; S.ver++; toast(fmt(j.units.length) + '세대를 백업에서 복원했습니다.' + (nImg ? ` (옵션 사진 ${nImg}장 포함)` : '')); location.hash = '#overview'; S.tab = 'overview'; render(); refreshImgUsage();
+  S.mg.imp = null; S.ver++; if (!quiet) toast(fmt(j.units.length) + '세대를 백업에서 복원했습니다.' + (nImg ? ` (옵션 사진 ${nImg}장 포함)` : '')); location.hash = '#overview'; S.tab = 'overview'; render(); refreshImgUsage();
 }
 const bufURL = (buf, type) => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(new Blob([buf], {type})); });
+// 모든 단지를 한 파일로 (홈 화면 앱을 다시 설치하거나 휴대폰을 바꿀 때 한 번에 옮기기)
+async function exportAllBackup() {
+  const ids = Object.keys(S.projects); if (!ids.length) return;
+  toast(`단지 ${ids.length}개를 담는 중…`);
+  const projects = [], now = new Date().toISOString();
+  for (const pid of ids) {
+    const m = clone(S.projects[pid]); let list;
+    try { list = (pid === S.pid ? units().list : await S.B.readUnits(pid)).map(u => Object.assign(stripUnit(u), {d: u.d})); }
+    catch (e) { toast(`'${m.name || '단지'}' 세대를 읽지 못해 저장하지 못했습니다. 다시 시도해 주세요.`); return; }
+    const images = await backupImages(m, list);
+    projects.push(Object.assign({format: 'apt-options-backup', version: 1, savedAt: now, meta: m, units: list}, Object.keys(images).length ? {images} : {}));
+  }
+  const data = JSON.stringify({format: 'apt-options-bundle', version: 1, savedAt: now, projects});
+  saveFile(`옵션관리_모든단지백업_${fileStamp()}.json`, data, `단지 ${projects.length}개를 한 파일로 저장했습니다.`, () => { ids.forEach(pid => lsSet('aptopt-backup:' + pid, now)); if (S.tab === 'manage') render(); });
+}
+async function backupImages(m, list) {
+  const images = {}, st = imgStore(), ids = [...new Set((m.options || []).flatMap(o => (o.choices || []).map(c => c.img)).concat(list.flatMap(u => Object.values(u.w || {}).flatMap(w => w.ph || []))).filter(Boolean))];
+  if (st && ids.length) for (const id of ids) { try { const r = await st.get(id); if (r) images[id] = {type: r.type, w: r.w, h: r.h, kind: r.kind, data: await bufURL(r.buf, r.type || 'image/jpeg'), thumb: r.tbuf ? await bufURL(r.tbuf, 'image/jpeg') : undefined}; } catch (e) {} }
+  return images;
+}
 async function exportBackup() {
   const m = clone(meta()), images = {};
   const st = imgStore(), ids = [...new Set((m.options || []).flatMap(o => (o.choices || []).map(c => c.img)).concat(units().list.flatMap(u => Object.values(u.w || {}).flatMap(w => w.ph || []))).filter(Boolean))];
@@ -1774,6 +1809,25 @@ async function exportBackup() {
   saveFile(fname('백업', 'json'), data, '백업 파일을 저장했습니다.', () => { lsSet('aptopt-backup:' + pid, new Date().toISOString()); if (S.tab === 'manage') render(); });
 }
 const lastBackup = pid => lsGet('aptopt-backup:' + pid);
+// 아이폰 홈 화면 앱인데 화면이 시간·배터리 줄 밑으로 들어가지 않음 = 첫 버전(흰 상태 표시줄 설정) 때 홈 화면에 추가된 앱.
+// 아이폰은 이 설정을 '홈 화면에 추가'할 때만 읽고 업데이트로는 바꾸지 않아서, 다시 추가해야 남색이 됨
+let _iosOld = null;
+function iosOldInstall() {
+  if (_iosOld !== null) return _iosOld;
+  const sa = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+  if (!sa || !/iPhone|iPad|iPod/.test(navigator.userAgent) || !window.__localInfo || innerWidth > innerHeight) return (_iosOld = false);
+  const d = document.createElement('div'); d.style.cssText = 'position:fixed;top:0;left:0;padding-top:env(safe-area-inset-top,0px);visibility:hidden;pointer-events:none';
+  document.body.appendChild(d); const t = parseFloat(getComputedStyle(d).paddingTop) || 0; d.remove();
+  return (_iosOld = t === 0);
+}
+function iosOldNote() {   // 3일에 한 번만 알려 줌
+  if (!iosOldInstall()) return ''; const last = lsGet('aptopt-iosold');
+  if (last && Date.now() - Date.parse(last) < 3 * 864e5) return '';
+  lsSet('aptopt-iosold', new Date().toISOString());
+  return '맨 위 시간·배터리 줄이 하얀 건 첫 버전 때 설치된 앱이라서입니다. 관리 → 이 기기에 저장에 다시 설치하는 방법이 있습니다.';
+}
+const iosOldHTML = () => `<div class="warnbox" style="margin:0"><b>맨 위 시간·배터리 줄이 하얗게 보이는 이유</b> — 이 앱은 첫 버전일 때 홈 화면에 추가돼서, 그때의 '흰 상태 표시줄' 설정으로 고정돼 있습니다. 아이폰은 이 설정을 홈 화면에 추가할 때만 읽기 때문에 업데이트로는 바뀌지 않습니다.
+  <ol style="margin:6px 0 0;padding-left:20px"><li>아래 <b>‘모든 단지 백업’</b>을 눌러 파일 앱에 저장 (앱을 지우면 안의 자료도 지워질 수 있음)</li><li>홈 화면 아이콘을 길게 눌러 삭제</li><li>사파리에서 아래 주소를 열고 공유 → 홈 화면에 추가 (‘웹 앱으로 열기’는 켠 채로)<div class="row" style="margin-top:4px"><code style="font-size:12px;word-break:break-all">${esc(location.origin + location.pathname)}</code><button class="btn sm" data-act="copy-url">주소 복사</button></div></li><li>새 아이콘으로 열고 관리 → 파일 선택 → 저장한 백업 파일 → 단지가 모두 돌아옴</li></ol></div>`;
 // 이 기기 저장판: 백업한 지 14일이 넘으면 하루 한 번 알림 (만든 지 3일 안 된 단지는 제외)
 function backupReminder() {
   if (!window.__localInfo || !S.pid || !units().list.length) return '';
@@ -1792,8 +1846,9 @@ function vLocalInfo() {
     <p class="muted num" style="font-size:13px">사용 ${mb(used)} / 약 5MB (${pct}%)${pct >= 80 ? ' · 거의 찼습니다. 쓰지 않는 단지를 백업한 뒤 삭제하세요.' : ''}</p>
     ${IMG.usage && IMG.usage.count ? `<p class="muted num" style="font-size:13px">옵션 사진 ${fmt(IMG.usage.count)}장 · ${mb(IMG.usage.bytes)} (사진은 별도 공간에 저장되어 위 5MB에 포함되지 않습니다)</p>` : ''}
     <p class="${stale ? 'warnline' : 'muted'}" style="font-size:13px">이 단지 마지막 백업: ${lb ? `${esc(fmtTime(lb))} (${days === 0 ? '오늘' : days + '일 전'})` : '아직 없음'}</p>
-    <div class="row"><button class="btn${stale ? ' pri' : ''}" data-act="proj-export">이 단지 백업 파일 저장</button>${li.persisted === false ? `<button class="btn" data-act="li-persist">지워지지 않게 보호 요청</button>` : ''}</div>
-    <p class="hint">휴대폰을 바꾸거나, 앱(아이콘)을 지우거나, 브라우저 데이터를 지우면 사라집니다. 백업 파일은 위 '파일에서 가져오기'로 언제든 복원됩니다.${li.persisted === true ? ' 저장 공간 보호: 켜짐.' : ''}</p>
+    ${iosOldInstall() ? iosOldHTML() : ''}
+    <div class="row"><button class="btn${stale && !iosOldInstall() ? ' pri' : ''}" data-act="proj-export">이 단지 백업 파일 저장</button>${Object.keys(S.projects).length > 1 || iosOldInstall() ? `<button class="btn${iosOldInstall() ? ' pri' : ''}" data-act="all-export">모든 단지 백업 (${Object.keys(S.projects).length}개, 한 파일)</button>` : ''}${li.persisted === false ? `<button class="btn" data-act="li-persist">지워지지 않게 보호 요청</button>` : ''}</div>
+    <p class="hint">휴대폰을 바꾸거나, 앱(아이콘)을 지우거나, 브라우저 데이터를 지우면 사라집니다. 백업 파일은 위 '파일에서 가져오기'로 언제든 복원됩니다 (모든 단지 백업 파일은 단지가 한꺼번에 복원됨).${li.persisted === true ? ' 저장 공간 보호: 켜짐.' : ''}</p>
     ${li.about ? `<p class="faint" style="font-size:12px;margin:0">${esc(li.about)}</p>` : ''}</div></section>`;
 }
 const L0 = v => v == null ? '' : colLetter(v);
@@ -2473,7 +2528,7 @@ function render() {
   if (S.note) notes.push(S.note);
   if (window.__aptNote) notes.push(window.__aptNote);
   if (S.B && S.B.kind === 'mem' && S.ready) notes.push('저장소에 연결되지 않은 화면입니다. 여기서 가져오거나 수정한 내용은 페이지를 닫으면 사라집니다. Claude에 로그인한 상태로 이 페이지를 열면 저장됩니다.');
-  if (S.ready && !S._sn) { S._sn = true; const n = window.__startupNote || backupReminder(); if (n) setTimeout(() => toast(n), 900); }
+  if (S.ready && !S._sn) { S._sn = true; const n = window.__startupNote || iosOldNote() || backupReminder(); if (n) setTimeout(() => toast(n), 900); }
   document.getElementById('notice').innerHTML = notes.length ? `<div class="wrap">${notes.map(n => `<div>${esc(n)}</div>`).join('')}</div>` : '';
   setSaving();
   let h;
@@ -2733,8 +2788,8 @@ function unitShareText(u) {
   if (m.asOf) lines.push(`${m.asOf} 기준 · ● 유상 선택`);
   return lines.join('\n');
 }
-function copyText(text) {
-  const ok = () => toast('세대 옵션을 복사했습니다. 카톡·문자에 붙여 넣으세요.');
+function copyText(text, msg) {
+  const ok = () => toast(msg || '세대 옵션을 복사했습니다. 카톡·문자에 붙여 넣으세요.');
   const old = () => { const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:-1000px;opacity:0'; document.body.appendChild(ta); ta.select(); let r = false; try { r = document.execCommand('copy'); } catch (e) {} ta.remove(); r ? ok() : toast('복사하지 못했습니다.'); };
   if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(ok, old); else old();
 }
@@ -2843,6 +2898,8 @@ document.addEventListener('click', e => {
     case 'imp-part-up': { const imp = S.mg.imp, i = +v; if (i > 0 && imp.parts[i]) { [imp.parts[i - 1], imp.parts[i]] = [imp.parts[i], imp.parts[i - 1]]; remerge(imp); } break; }
     case 'imp-part-del': { const imp = S.mg.imp; imp.parts.splice(+v, 1); if (imp.parts.length <= 1) S.mg.imp = toSingle(imp); else remerge(imp); break; }
     case 'proj-export': exportBackup(); return;
+    case 'all-export': exportAllBackup(); return;
+    case 'copy-url': copyText(location.origin + location.pathname, '주소를 복사했습니다. 사파리 주소창에 붙여 넣으세요.'); return;
     case 'dt-open': if (window.__desktop) window.__desktop.openDir(); return;
     case 'img-view': openLightbox(t.dataset.o, t.dataset.c, t.dataset.sel); return;
     case 'uv-mode': S.uv.mode = v === 'work' ? 'work' : 'view'; lsSet('aptopt-uvmode', S.uv.mode); S.ws = null; break;

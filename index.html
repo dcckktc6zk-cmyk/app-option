@@ -183,6 +183,7 @@ table.grid{border-collapse:separate;border-spacing:0;font-size:13px;min-width:10
 .mg{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:18px;align-items:start}
 .drop{border:1.5px dashed var(--line);border-radius:8px;padding:22px 16px;text-align:center;color:var(--ink-2);background:var(--bg)}
 .drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.demo-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;padding:10px 12px;border:1px solid var(--line-2);border-radius:8px;font-size:13px;background:var(--surface)}
 .oedit{border:1px solid var(--line-2);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 .mparts{display:flex;flex-direction:column;gap:6px}
 .mpart{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid var(--line-2);border-radius:6px;padding:8px 10px;background:var(--surface)}
@@ -562,19 +563,20 @@ window.__pdfLib = async () => {
   if (!window.pdfjsLib) { const m = await import(new URL('pdf.min.mjs', location.href).href); m.GlobalWorkerOptions.workerSrc = new URL('pdf.worker.min.mjs', location.href).href; window.pdfjsLib = m; }
   return window.pdfjsLib;
 };
+window.__demoFiles = {"1": [{"url": "demo-1a.xlsx", "name": "데모센트럴자이 조합 유상옵션 계약현황_261020.xlsx"}, {"url": "demo-1b.xlsx", "name": "데모센트럴자이 가전 계약현황_261020.xlsx"}], "2": [{"url": "demo-2a.xlsx", "name": "데모센트럴자이 조합 유상옵션 계약현황_261120.xlsx"}, {"url": "demo-2b.xlsx", "name": "데모센트럴자이 가전 계약현황_261120.xlsx"}]};   // 예시 파일(시연용 가상 단지) — 관리 화면·첫 화면의 '예시' 버튼
 window.__maskDefault = true;   // 폰 분실 대비: 엑셀을 가져올 때 계약자명 가리기를 기본으로 (가져오기 화면에서 끌 수 있음)
 try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(v => { if (window.__localInfo) window.__localInfo.persisted = v; }); } catch (e) {}
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 (() => {
-  const V = '1.4.4', B = '2026-11-26';
+  const V = '1.4.5', B = '2026-11-26';
   if (window.__localInfo) window.__localInfo.about = `앱 버전 ${V} (${B}) · 현장 업무 보조용 개인 제작 도구이며, 회사 공식 시스템이 아닙니다.`;
   try { const pv = localStorage.getItem('aptopt-ver'); if (pv && pv !== V) window.__startupNote = `새 버전(${V})으로 업데이트되었습니다. 저장된 데이터는 그대로입니다.`; localStorage.setItem('aptopt-ver', V); } catch (e) {}
   window.__welcomeHTML = () => `<div class="panel welcome"><div class="wl-logos"><img src="gs-logo.png" alt="GS건설"><i></i><img class="wl-xi" src="xi-navy.png" alt="Xi"></div>
     <h2>아파트 옵션 관리</h2><p class="muted" style="margin:0">세대별 유상옵션을 폰에서 바로 찾아보고 비교합니다.<br>데이터는 이 기기에만 저장됩니다.</p>
+    <div class="row" style="justify-content:center;gap:8px;margin-top:16px"><a class="btn pri" href="#manage">엑셀 가져오러 가기</a><button class="btn" type="button" data-act="demo-load" data-v="1">예시 단지로 먼저 둘러보기</button></div>
     <ol class="wl-steps"><li><b>엑셀 가져오기</b><span>관리 → 파일 선택에서 형별계약내역 엑셀(또는 백업 파일)을 고르세요.</span></li>
     <li><b>홈 화면에 추가</b><span>아이콘으로 바로 열리고, 인터넷이 없어도 쓸 수 있습니다.</span></li>
     <li><b>가끔 백업</b><span>관리 → 백업 파일 저장. 폰을 바꿔도 그대로 복원됩니다.</span></li></ol>
-    <a class="btn pri" href="#manage">엑셀 가져오러 가기</a>
     <p class="faint" style="font-size:12px;margin:16px 0 0">현장 업무 보조용 개인 제작 도구 · 회사 공식 시스템이 아닙니다 · v${V}</p></div>`;
   // 홈 화면 설치 안내 (설치 전, 한 번 닫으면 다시 안 뜸)
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -1777,7 +1779,7 @@ async function importBackup(j, quiet) {
   S.projects[pid] = m; switchProject(pid); S.chunksReady = true; S.B.sync(metaPath(pid), clone(m));
   putUnits(j.units.filter(u => u && u.d != null && u.h != null).map(u => Object.assign({s: {}}, u, {d: String(u.d), h: String(u.h)})));
   logAction(`백업에서 복원 · ${fmt(j.units.length)}세대`, 'import', []);
-  S.mg.imp = null; S.ver++; if (!quiet) toast(fmt(j.units.length) + '세대를 백업에서 복원했습니다.' + (nImg ? ` (옵션 사진 ${nImg}장 포함)` : '')); location.hash = '#overview'; S.tab = 'overview'; render(); refreshImgUsage();
+  S.mg.imp = null; S.ver++; if (!quiet) toast(fmt(j.units.length) + '세대를 백업에서 복원했습니다.' + (nImg ? ` (옵션 사진 ${nImg}장 포함)` : '')); location.hash = '#overview'; if (S.tab !== 'overview') window.scrollTo(0, 0); S.tab = 'overview'; render(); refreshImgUsage();
 }
 const bufURL = (buf, type) => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(new Blob([buf], {type})); });
 // 모든 단지를 한 파일로 (홈 화면 앱을 다시 설치하거나 휴대폰을 바꿀 때 한 번에 옮기기)
@@ -1897,15 +1899,15 @@ function computeDiff(res, mask) {
     omap[no.id] = {o, no, cmap, nc};
   });
   const matchRate = res.options.length ? (res.options.length - newOpts.length) / res.options.length : 0;
-  const masked = !!mask || namesMasked(), changes = [], added = [], keys = new Set(); let skipped = 0, keptFlag = 0;
+  const masked = !!mask || namesMasked(), changes = [], added = [], keys = new Set(); let skipped = 0, keptFlag = 0, matched = 0, cells = 0;
   // 행 색으로 표시된 자료: 같은 색끼리 맞춰 비교. 새 자료에 없는 색(직접 붙인 표시)은 건드리지 않음
   const fileColors = new Set(res.flagCol ? [] : (res.flags || []).map(f => colorKey(f.color))), projFlags = meta().flags || [];
   res.units.forEach(nu => {
     const k = nu.d + '-' + nu.h; keys.add(k); const u = map.get(k);
     if (!u) { added.push(nu); return; }
-    const items = [];
+    const items = []; matched++;
     res.options.forEach(no => {
-      const mp = omap[no.id], ns = nu.s[no.id] != null ? nu.s[no.id] : null;
+      const mp = omap[no.id], ns = nu.s[no.id] != null ? nu.s[no.id] : null; if (ns != null) cells++;
       if (!mp.o) { if (ns != null) items.push({kind: 'newopt', noid: no.id, lab: no.name, fromName: '', toName: chName(no, ns)}); return; }
       const cs = sel(u, mp.o);
       if (ns == null) { if (cs != null) skipped++; return; }
@@ -1926,7 +1928,7 @@ function computeDiff(res, mask) {
     if (nu.c != null && nu.c !== u.c) items.push({kind: 'field', f: 'c', lab: '옵션계약', from: cText(u.c), to: cText(nu.c), val: nu.c});
     if (items.length) changes.push({key: k, nu, items});
   });
-  return {omap, newOpts, newCh, matchRate, changes, added, missing: list.filter(u => !keys.has(ukey(u))), skipped, keptFlag, masked};
+  return {omap, newOpts, newCh, matchRate, changes, added, missing: list.filter(u => !keys.has(ukey(u))), skipped, keptFlag, masked, matched, cells};
 }
 function getDiff(imp) {
   const key = S.pid + '|' + S.ver + '|' + (imp.mask ? 1 : 0);
@@ -1938,7 +1940,13 @@ function diffView(df, imp) {
   const rows = diffItems(df, imp), nUnits = new Set(rows.map(r => r[0])).size;
   df.added.forEach(nu => rows.push([nu.d + '-' + nu.h, '세대', '', '새로 추가']));
   const nCh = rows.length - df.added.length;
-  let h = `<div class="diffbox"><div class="label">현재 단지와 비교한 결과</div><div class="dsums"><span class="pill ${nCh ? 'k2' : 'k0'} num">바뀐 항목 ${fmt(nCh)}건 · ${fmt(nUnits)}세대</span><span class="pill ${df.added.length ? 'k1' : 'k0'} num">새 세대 ${fmt(df.added.length)}</span><span class="pill k0 num">새 자료에 없는 세대 ${fmt(df.missing.length)} · 그대로 둠</span>${df.newCh.length ? `<span class="pill k3 num">새 선택지 ${df.newCh.length}</span>` : ''}${df.newOpts.length ? `<span class="pill k4 num">새 옵션 ${df.newOpts.length}</span>` : ''}</div>`;
+  let h = `<div class="diffbox"><div class="label">현재 단지와 비교한 결과</div>${df.cells ? `<p class="hint" style="margin:0">두 자료에 모두 있는 ${fmt(df.matched)}세대의 옵션 값 ${fmt(df.cells)}칸을 하나씩 대조했습니다.</p>` : ''}<div class="dsums"><span class="pill ${nCh ? 'k2' : 'k0'} num">바뀐 항목 ${fmt(nCh)}건 · ${fmt(nUnits)}세대</span><span class="pill ${df.added.length ? 'k1' : 'k0'} num">새 세대 ${fmt(df.added.length)}</span><span class="pill k0 num">새 자료에 없는 세대 ${fmt(df.missing.length)} · 그대로 둠</span>${df.newCh.length ? `<span class="pill k3 num">새 선택지 ${df.newCh.length}</span>` : ''}${df.newOpts.length ? `<span class="pill k4 num">새 옵션 ${df.newOpts.length}</span>` : ''}</div>`;
+  { // 바뀐 세대를 종류별로: 옵션 변경 / 새로 계약 / 계약자 변경 / 색상 표시
+    let opt = 0, fresh = 0, name = 0, flag = 0;
+    df.changes.forEach(c => { const its = c.items; if (its.some(it => it.kind === 'field' && it.f === 'c' && it.val === 1)) fresh++; else if (its.some(it => it.kind === 'opt' || (it.kind === 'newopt' && imp.addOpts !== false))) opt++; if (its.some(it => it.kind === 'field' && it.f === 'n')) name++; if (its.some(it => it.kind === 'flag')) flag++; });
+    const brk = [[opt, '옵션이 바뀐 세대'], [fresh, '옵션을 새로 계약한 세대'], [name, '계약자가 바뀐 세대'], [flag, '색상 표시가 바뀐 세대']].filter(x => x[0]);
+    if (brk.length > 1) h += `<p class="hint num" style="margin:0">${brk.map(x => `${x[1]} <b>${fmt(x[0])}</b>`).join(' · ')}</p>`;
+  }
   if (df.matchRate < 0.5) {
     const nNew = df.changes.reduce((s, c) => s + c.items.filter(it => it.kind === 'newopt').length, 0);
     // 세대는 거의 같고 옵션만 다르면: 같은 단지의 다른 옵션 파일(2차 옵션 등)일 가능성이 큼
@@ -2050,7 +2058,7 @@ function commitImport() {
   }
   putUnits(list);
   logAction(`${imp.mode === 'replace' ? '파일로 전체 교체' : '파일에서 가져옴'} · ${imp.file} · ${fmt(list.length)}세대`, 'import', []);
-  S.mg.imp = null; S.ver++; toast(fmt(list.length) + '세대를 가져왔습니다.'); location.hash = '#overview'; S.tab = 'overview'; render();
+  S.mg.imp = null; S.ver++; toast(fmt(list.length) + '세대를 가져왔습니다.' + (imp.demo === '1' ? ' 둘러본 뒤 관리 → 「2차 변경본으로 반영」도 눌러 보세요.' : '')); location.hash = '#overview'; if (S.tab !== 'overview') window.scrollTo(0, 0); S.tab = 'overview'; render();
 }
 
 /* ───────── views ───────── */
@@ -2425,12 +2433,29 @@ function vImportMulti(imp) {
   if (res.warn.length) h += impWarnHTML(res.warn, 6);
   return h + impModeHTML(imp, res);
 }
+/* 예시 파일(가상 단지) — 설치형 웹앱에만 함께 올라감. 처음 보는 사람이 자기 엑셀 없이도 가져오기·변경 반영을 해 볼 수 있게 */
+const isDemoProj = () => /데모센트럴자이/.test((meta() || {}).name || '');
+function demoRowHTML() {
+  return `<div class="demo-row"><span class="muted">처음이라면 예시 파일(가상 단지)로 해 보세요</span><span class="row"><button class="btn sm" data-act="demo-load" data-v="1">1차 계약현황 (10월)</button>${isDemoProj() ? `<button class="btn sm pri" data-act="demo-load" data-v="2">2차 변경본 (11월)으로 반영</button>` : ''}</span></div>`;
+}
+async function demoLoad(v) {
+  const L = (window.__demoFiles || {})[v]; if (!L) return;
+  if (location.hash !== '#manage') location.hash = '#manage';
+  const mine = S.mg.imp = {file: '예시 파일', busy: '예시 파일을 불러오는 중입니다…'}; render();
+  let files;
+  try { files = await Promise.all(L.map(async x => { const r = await fetch(x.url); if (!r.ok) throw new Error(String(r.status)); return new File([await r.blob()], x.name, {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', lastModified: Date.now()}); })); }
+  catch (e) { if (S.mg.imp === mine) { S.mg.imp = {file: '예시 파일', fatal: '불러오지 못했습니다. 인터넷 연결을 확인한 뒤 다시 눌러 주세요.'}; render(); } return; }
+  if (S.mg.imp !== mine) return;   // 그 사이 다른 파일을 골랐음
+  await loadImports(files);
+  if (S.mg.imp && !S.mg.imp.fatal) S.mg.imp.demo = v;
+}
 function vImport() {
   const imp = S.mg.imp;
   let h = `<section class="panel"><div class="panel-h"><h2>파일에서 가져오기</h2></div><div class="panel-b steps">`;
   if (!imp || imp.fatal) {
     h += `<div class="drop" id="drop"><p><b>옵션 계약 내역 파일</b>을 여기에 끌어다 놓거나</p><p style="margin:10px 0"><label class="btn pri" for="impFile">파일 선택</label><input class="sr" type="file" id="impFile" multiple accept="${IMP_ACCEPT},.json"></p><p class="faint" style="font-size:12px">Excel(.xlsx) · CSV · PDF. 동·호 열과 옵션별 표시(1, O, ✓ 또는 선택값)가 있는 세대 목록이면 옵션 항목까지 자동으로 구성됩니다. <b>옵션이 여러 파일(1차·2차, 동별 등)로 나뉘어 있으면 한꺼번에 여러 개를 선택하세요.</b> 한 단지로 합칩니다. 이 사이트에서 저장한 백업(.json)도 여기로 복원합니다.</p></div>`;
     if (imp && imp.fatal) h += `<p class="err">${esc(imp.file)}: ${esc(imp.fatal)}</p>`;
+    if (window.__demoFiles) h += demoRowHTML();
     return h + `</div></section>`;
   }
   if (imp.multi) return h + vImportMulti(imp) + `</div></section>`;
@@ -2481,11 +2506,29 @@ function histGroups() {
   if (q) gs = gs.map(d => { const lm = String(d.label || '').replace(/\s/g, '').toLowerCase().includes(q), its = lm ? (d.items || []) : (d.items || []).filter(it => it.join('|').replace(/\s/g, '').toLowerCase().includes(q)); return Object.assign({}, d, {items: its, _hit: lm || its.length > 0}); }).filter(d => d._hit);
   return gs;
 }
+/* 이 단지에서 앱으로 처리한 일 (되돌린 작업은 빼고) — 보고·효과 정리에 쓰는 실제 숫자 */
+function usageHTML() {
+  const L = Object.values(S.logs).filter(d => !d.undone), by = (...s) => L.filter(d => s.includes(d.src));
+  const nIt = ds => ds.reduce((n, d) => n + (d.items || []).filter(it => it[0]).length, 0);
+  const files = by('file'), nFile = files.filter(d => !d.part || d.part === 1).length, nChg = nIt(files), nWork = nIt(by('work')), nEdit = nIt(by('edit', 'bulk'));
+  if (!nFile && !nWork && !nEdit) return '';
+  const U = units().list, TO = trackedOpts(); let done = 0, redo = 0;
+  U.forEach(u => TO.forEach(o => { const st = wStat(u, o); if (st === 'done') done++; else if (st === 'redo') redo++; }));
+  const viol = U.filter(u => unitBroken(u).length).length;
+  const stat = (v, l) => `<div class="stat"><b class="num">${v}</b><span>${l}</span></div>`;
+  let h = '';
+  if (nFile) h += stat(fmt(nFile) + '회', '새 자료 반영') + stat(fmt(nChg) + '건', '대조로 찾아 반영한 변경');
+  if (nWork) h += stat(fmt(nWork) + '건', '시공 체크 기록') + stat(fmt(done) + '건', '지금 시공 완료 상태');
+  if (redo) h += stat(fmt(redo) + '건', '재시공 확인 필요 (자동 감지)');
+  if (viol) h += stat(fmt(viol) + '세대', '연계 규칙 위반 발견');
+  if (nEdit) h += stat(fmt(nEdit) + '건', '직접 수정·일괄 변경');
+  return `<div><div class="label">이 단지에서 지금까지 <span class="faint" style="font-weight:400">· 되돌린 작업 제외</span></div><div class="stats" style="margin-top:6px">${h}</div></div>`;
+}
 function vHistory() {
   const hv = S.hv, gs = histGroups(), total = Object.keys(S.logs).length, nItems = gs.reduce((n, d) => n + (d.items || []).length, 0);
   askNames(gs.slice(0, 200).map(d => d.by).filter(Boolean));
   let h = `<section class="panel"><div class="panel-h"><h2>변경 이력</h2><span class="muted num">${fmt(gs.length)}건 작업${nItems ? ` · ${fmt(nItems)}개 항목` : ''}</span><div class="row sp"><div class="row" role="group" aria-label="기간">${[['d1', '오늘'], ['d7', '7일'], ['d30', '30일'], ['all', '전체']].map(([k, l]) => `<button class="chip" data-act="hist-range" data-v="${k}" aria-pressed="${hv.range === k}">${l}</button>`).join('')}</div>${S.downloads && gs.length ? `<button class="btn sm" data-act="x-hist">엑셀로 저장</button>` : ''}</div></div>
-  <div class="panel-b" style="display:flex;flex-direction:column;gap:12px"><label class="field" style="max-width:380px">이력 검색<input id="hq" type="search" data-ch="hist-q" placeholder="세대(106-1502), 옵션 이름, 값" value="${esc(hv.q)}" enterkeyhint="search"></label>`;
+  <div class="panel-b" style="display:flex;flex-direction:column;gap:12px">${S.logsReady ? usageHTML() : ''}<label class="field" style="max-width:380px">이력 검색<input id="hq" type="search" data-ch="hist-q" placeholder="세대(106-1502), 옵션 이름, 값" value="${esc(hv.q)}" enterkeyhint="search"></label>`;
   if (!S.logsReady) h += `<p class="muted">이력을 불러오는 중입니다…</p>`;
   else if (!total) h += `<div class="empty"><h2>아직 기록된 변경이 없습니다</h2><p>세대 수정, 한꺼번에 바꾸기, 새 자료 반영, 옵션 설정 변경이 여기에 차례로 남습니다.<br>잘못 바꾼 내용은 위쪽 ‘되돌리기’로 바로 취소할 수 있습니다.</p></div>`;
   else if (!gs.length) h += `<p class="muted">조건에 맞는 이력이 없습니다. 기간을 넓히거나 검색어를 지워 보세요.</p>`;
@@ -2546,7 +2589,12 @@ function render() {
 }
 function setBarH() { const bar = document.querySelector('.bar'); if (bar) document.documentElement.style.setProperty('--barh', bar.offsetHeight + 'px'); }
 window.addEventListener('resize', setBarH);
-function route() { const t = (location.hash || '').slice(1); S.tab = TABS.includes(t) ? t : 'overview'; render(); }
+function route() {
+  const t = (location.hash || '').slice(1), nt = TABS.includes(t) ? t : 'overview';
+  // 다른 탭으로 옮기면 맨 위부터 (예전엔 앞 화면에서 내려간 만큼 새 화면도 중간부터 보였음 — '반영' 뒤 변경 이력 등). 세대로 바로 가기는 render가 다시 그 세대로 내림
+  if (nt !== S.tab) window.scrollTo(0, 0);
+  S.tab = nt; render();
+}
 
 /* ───────── 옵션 사진 (이 기기 저장판: 독립 실행·설치형 웹앱) ───────── */
 const IMG = {ok: false, url: new Map(), turl: new Map(), loading: new Set(), usage: null};
@@ -2899,6 +2947,7 @@ document.addEventListener('click', e => {
     case 'imp-part-del': { const imp = S.mg.imp; imp.parts.splice(+v, 1); if (imp.parts.length <= 1) S.mg.imp = toSingle(imp); else remerge(imp); break; }
     case 'proj-export': exportBackup(); return;
     case 'all-export': exportAllBackup(); return;
+    case 'demo-load': demoLoad(v); return;
     case 'copy-url': copyText(location.origin + location.pathname, '주소를 복사했습니다. 사파리 주소창에 붙여 넣으세요.'); return;
     case 'dt-open': if (window.__desktop) window.__desktop.openDir(); return;
     case 'img-view': openLightbox(t.dataset.o, t.dataset.c, t.dataset.sel); return;
@@ -2958,7 +3007,7 @@ document.addEventListener('click', e => {
       if (units().map.has(d + '-' + h)) { toast('이미 있는 세대입니다.'); return; }
       const cid = Object.keys(S.chunks).find(k => S.chunks[k].dong === d && S.chunks[k].units.length < 400) || newId('c'), key = d + '-' + h;
       mutate(`${key} 세대 추가`, (touch, items) => { touch(cid); if (!S.chunks[cid]) S.chunks[cid] = {dong: d, units: []}; const u = {d, h, s: {}, _c: cid}; if (g('nuT')) u.t = g('nuT'); if (g('nuN')) u.n = g('nuN'); S.chunks[cid].units.push(u); items.push([key, '세대', '', '추가']); }, {src: 'add'});
-      S.uv.dong = d; S.uv.key = d + '-' + h; S.uv.edit = true; location.hash = '#units'; S.tab = 'units'; toast('세대를 추가했습니다. 옵션을 선택해 주세요.'); break;
+      S.uv.dong = d; S.uv.key = d + '-' + h; S.uv.edit = true; location.hash = '#units'; if (S.tab !== 'units') window.scrollTo(0, 0); S.tab = 'units'; toast('세대를 추가했습니다. 옵션을 선택해 주세요.'); break;
     }
     case 'opt-add': mutate('옵션 추가', (touch, items) => { const m = meta(), n = m.options.reduce((x, o) => Math.max(x, +String(o.id).replace(/\D/g, '') || 0), 0) + 1; m.options.push({id: 'o' + n, name: '새 옵션', choices: [{id: 'c1', name: '기본형', b: 1}, {id: 'c2', name: '선택형'}]}); items.push(['', '옵션', '', '새 옵션 추가']); }, {meta: true, src: 'config'}); break;
     case 'opt-up': case 'opt-down': { const m = meta(), i = m.options.findIndex(o => o.id === t.dataset.o), j = i + (a === 'opt-up' ? -1 : 1); if (i >= 0 && j >= 0 && j < m.options.length) { [m.options[i], m.options[j]] = [m.options[j], m.options[i]]; saveMeta(); } break; }

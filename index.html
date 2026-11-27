@@ -568,7 +568,7 @@ window.__maskDefault = true;   // 폰 분실 대비: 엑셀을 가져올 때 계
 try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(v => { if (window.__localInfo) window.__localInfo.persisted = v; }); } catch (e) {}
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 (() => {
-  const V = '1.4.5', B = '2026-11-26';
+  const V = '1.4.7', B = '2026-11-27';
   if (window.__localInfo) window.__localInfo.about = `앱 버전 ${V} (${B}) · 현장 업무 보조용 개인 제작 도구이며, 회사 공식 시스템이 아닙니다.`;
   try { const pv = localStorage.getItem('aptopt-ver'); if (pv && pv !== V) window.__startupNote = `새 버전(${V})으로 업데이트되었습니다. 저장된 데이터는 그대로입니다.`; localStorage.setItem('aptopt-ver', V); } catch (e) {}
   window.__welcomeHTML = () => `<div class="panel welcome"><div class="wl-logos"><img src="gs-logo.png" alt="GS건설"><i></i><img class="wl-xi" src="xi-navy.png" alt="Xi"></div>
@@ -864,7 +864,7 @@ function switchProject(pid) {
   S.pid = pid; if (pid) lsSet('apt-opt-pid', pid);
   S.uv.dong = null; S.uv.key = null; S.uv.edit = false; S.uv.colorBy = 'paid';
   S.cmp.sel = new Set(); S.cmp.opts = null; S.cmp.fd = new Set(); S.cmp.ft = new Set(); S.cmp.ff = new Set(); S.cmp.conds = []; S.cmp.bk = {o: '', v: '', confirm: false}; S.cmp.sort = null; S.cmp.forPid = null;
-  S.undo = []; S.hv.open = new Set();
+  S.undo = []; S.hv.open = new Set(); S.mg.wt = null;
   S.B.open(pid);
 }
 
@@ -894,7 +894,7 @@ function isDateFmt(id, custom) {
 function serialDate(v) { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v * 86400000)); return d.toISOString().slice(0, 10); }
 async function readXlsx(buf) {
   const zip = await unzip(buf), P = s => new DOMParser().parseFromString(s, 'application/xml'), els = (n, t) => Array.from(n.getElementsByTagNameNS('*', t));
-  const wbx = await zip('xl/workbook.xml'); if (!wbx) throw new Error('엑셀 통합 문서를 찾지 못했습니다.');
+  const wbx = await zip('xl/workbook.xml'); if (!wbx) throw new Error(await zip('xl/workbook.bin') ? '바이너리 통합 문서(.xlsb)는 읽을 수 없습니다. 엑셀에서 .xlsx로 다시 저장해 주세요.' : '엑셀 통합 문서를 찾지 못했습니다.');
   const rel = {}; const rx = await zip('xl/_rels/workbook.xml.rels'); if (rx) els(P(rx), 'Relationship').forEach(r => rel[r.getAttribute('Id')] = r.getAttribute('Target'));
   const sst = []; const ssx = await zip('xl/sharedStrings.xml');
   if (ssx) els(P(ssx), 'si').forEach(si => { let t = ''; (function walk(n) { for (const c of n.children) { if (c.localName === 'rPh' || c.localName === 'phoneticPr') continue; if (c.localName === 't') t += c.textContent; else walk(c); } })(si); sst.push(t); });
@@ -989,10 +989,176 @@ async function readPdf(buf, name) {
   const rows = lines.map(ln => { const r = new Array(ordered.length).fill(''); ln.items.sort((a, b) => a.x - b.x).forEach(it => { r[it.col.i] = r[it.col.i] ? r[it.col.i] + ' ' + it.s : it.s; }); return r; });
   return [{name, rows, merges: [], rowFill: [], flat: true}];
 }
+/* 웹 시스템에서 받은 '엑셀'(.xls인데 내용은 HTML 표): 표 칸·병합(rowspan/colspan)·배경색을 읽는다 */
+const CSS_NAMED = {yellow: '#FFFF00', red: '#FF0000', orange: '#FFA500', lime: '#00FF00', green: '#008000', aqua: '#00FFFF', cyan: '#00FFFF', blue: '#0000FF', fuchsia: '#FF00FF', magenta: '#FF00FF', pink: '#FFC0CB', silver: '#C0C0C0', gray: '#808080', grey: '#808080', lightyellow: '#FFFFE0', gold: '#FFD700', skyblue: '#87CEEB', lightblue: '#ADD8E6', lightgreen: '#90EE90', white: '#FFFFFF', black: '#000000'};
+function cssColor(v) {
+  v = String(v || '').trim().toLowerCase(); let m;
+  if (!v || /^(transparent|none|inherit|initial|auto)$/.test(v)) return null;
+  if ((m = v.match(/^#?([0-9a-f]{6})$/))) return '#' + m[1].toUpperCase();
+  if ((m = v.match(/^#([0-9a-f]{3})$/))) return '#' + m[1].split('').map(x => x + x).join('').toUpperCase();
+  if ((m = v.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/))) return '#' + [m[1], m[2], m[3]].map(x => Math.min(255, +x).toString(16).padStart(2, '0')).join('').toUpperCase();
+  return CSS_NAMED[v] || null;
+}
+function readHtmlXls(buf, name) {
+  let text = new TextDecoder('utf-8').decode(buf);
+  const cs = (text.slice(0, 4000).match(/charset\s*=\s*["']?([\w-]+)/i) || [])[1];
+  if ((cs && !/utf-?8/i.test(cs)) || text.includes('\uFFFD')) { try { text = new TextDecoder(cs && !/utf-?8/i.test(cs) ? cs : 'euc-kr').decode(buf); } catch (e) { try { text = new TextDecoder('euc-kr').decode(buf); } catch (e2) {} } }
+  const doc = new DOMParser().parseFromString(text, 'text/html'), cls = {};
+  doc.querySelectorAll('style').forEach(st => { for (const m of st.textContent.matchAll(/\.([\w-]+)\s*\{([^}]*)\}/g)) { const b = m[2].match(/background(?:-color)?\s*:\s*([^;]+)/i); const c = b && b[1].trim().split(/\s+/).map(cssColor).find(Boolean); if (c) cls[m[1]] = c; } });
+  const colorOf = el => {
+    let c = cssColor(el.getAttribute('bgcolor'));
+    const m = (el.getAttribute('style') || '').match(/background(?:-color)?\s*:\s*([^;]+)/i); if (m) c = m[1].trim().split(/\s+/).map(cssColor).find(Boolean) || c;
+    if (!c) for (const k of el.classList) if (cls[k]) { c = cls[k]; break; }
+    return c && c !== '#FFFFFF' ? c : null;
+  };
+  const tables = [...doc.querySelectorAll('table')].filter(t => !t.querySelector('table'));   // 표 안의 표는 안쪽만
+  if (!tables.length) throw new Error('파일 안에서 표를 찾지 못했습니다.');
+  return tables.map((tb, ti) => {
+    const rows = [], merges = [], rowFill = [], occ = [];
+    [...tb.rows].forEach((tr, r) => {
+      rows[r] = rows[r] || []; occ[r] = occ[r] || []; const fc = {}, trBg = colorOf(tr); let c = 0;
+      [...tr.cells].forEach(td => {
+        while (occ[r][c]) c++;
+        const sc = Math.max(1, Math.min(200, +td.colSpan || 1)), sr = Math.max(1, Math.min(5000, +td.rowSpan || 1));
+        rows[r][c] = norm(td.textContent);
+        for (let i = 0; i < sr; i++) for (let j = 0; j < sc; j++) (occ[r + i] = occ[r + i] || [])[c + j] = 1;
+        if (sc > 1 || sr > 1) merges.push({r1: r, c1: c, r2: r + sr - 1, c2: c + sc - 1});
+        const bg = colorOf(td) || trBg; if (bg && c < 8) fc[bg] = (fc[bg] || 0) + sc;
+        c += sc;
+      });
+      const top = Object.entries(fc).sort((a, b) => b[1] - a[1])[0]; rowFill[r] = top && top[1] >= 3 ? top[0] : null;
+    });
+    for (let i = 0; i < rows.length; i++) { rows[i] = rows[i] || []; for (let j = 0; j < rows[i].length; j++) if (rows[i][j] == null) rows[i][j] = ''; }
+    return {name: tables.length > 1 ? `표 ${ti + 1}` : '표', rows, merges, rowFill, hidden: false};
+  });
+}
+/* 구형 엑셀(.xls, Excel 97~2003): 복합 문서(CFB)에서 통합 문서 스트림을 꺼낸다 */
+function cfbStream(buf, names) {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf), END = 0xFFFFFFFA;
+  const ss = 1 << dv.getUint16(30, true), mss = 1 << dv.getUint16(32, true), nFat = dv.getUint32(44, true), dir0 = dv.getUint32(48, true), cutoff = dv.getUint32(56, true) || 4096, mf0 = dv.getUint32(60, true), dif0 = dv.getUint32(68, true), nDif = dv.getUint32(72, true);
+  if (ss !== 512 && ss !== 4096) throw new Error('엑셀(.xls) 파일 구조를 읽지 못했습니다.');
+  const off = s => (s + 1) * ss, fatSecs = [];
+  for (let i = 0; i < 109 && fatSecs.length < nFat; i++) fatSecs.push(dv.getUint32(76 + i * 4, true));
+  for (let d = dif0, k = 0; k < nDif && d < END && off(d) + ss <= buf.byteLength; k++) { const o = off(d), per = ss / 4 - 1; for (let i = 0; i < per && fatSecs.length < nFat; i++) fatSecs.push(dv.getUint32(o + i * 4, true)); d = dv.getUint32(o + per * 4, true); }
+  const fat = []; fatSecs.forEach(s => { const o = off(s); if (o + ss > buf.byteLength) return; for (let i = 0; i < ss / 4; i++) fat.push(dv.getUint32(o + i * 4, true)); });
+  const chain = (s, tbl) => { const out = [], seen = new Set(); while (s < END && s < tbl.length && !seen.has(s)) { seen.add(s); out.push(s); s = tbl[s]; } return out; };
+  const big = (s0, size) => { const secs = chain(s0, fat), out = new Uint8Array(secs.length * ss); secs.forEach((s, i) => { const o = off(s); out.set(u8.subarray(o, Math.min(o + ss, buf.byteLength)), i * ss); }); return size != null ? out.subarray(0, Math.min(size, out.length)) : out; };
+  const dir = big(dir0), ents = [], dd = new DataView(dir.buffer, dir.byteOffset, dir.byteLength);
+  for (let o = 0; o + 128 <= dir.length; o += 128) { const nl = dd.getUint16(o + 64, true); ents.push({name: new TextDecoder('utf-16le').decode(dir.subarray(o, o + Math.max(0, Math.min(64, nl) - 2))), type: dir[o + 66], start: dd.getUint32(o + 116, true), size: dd.getUint32(o + 120, true)}); }
+  const root = ents.find(e => e.type === 5), ent = names.map(n => ents.find(e => e.type === 2 && e.name.toLowerCase() === n.toLowerCase())).find(Boolean);
+  if (!ent) return null;
+  if (ent.size >= cutoff || !root) return big(ent.start, ent.size);
+  const mini = big(root.start, root.size), mfat = [];   // 4KB보다 작은 스트림은 미니 스트림에 들어 있음
+  chain(mf0, fat).forEach(s => { const o = off(s); for (let i = 0; i < ss / 4; i++) mfat.push(dv.getUint32(o + i * 4, true)); });
+  const secs = chain(ent.start, mfat), out = new Uint8Array(secs.length * mss); secs.forEach((s, i) => out.set(mini.subarray(s * mss, s * mss + mss), i * mss));
+  return out.subarray(0, ent.size);
+}
+// 엑셀 97~2003 기본 색상표 (색 번호 0~63)
+const XLS_PAL = '000000 FFFFFF FF0000 00FF00 0000FF FFFF00 FF00FF 00FFFF 000000 FFFFFF FF0000 00FF00 0000FF FFFF00 FF00FF 00FFFF 800000 008000 000080 808000 800080 008080 C0C0C0 808080 9999FF 993366 FFFFCC CCFFFF 660066 FF8080 0066CC CCCCFF 000080 FF00FF FFFF00 00FFFF 800080 800000 008080 0000FF 00CCFF CCFFFF CCFFCC FFFF99 99CCFF FF99CC CC99FF FFCC99 3366FF 33CCCC 99CC00 FFCC00 FF9900 FF6600 666699 969696 003366 339966 003300 333300 993300 993366 333399 333333'.split(' ').map(x => '#' + x);
+/* .xls 통합 문서(BIFF8) 레코드에서 시트·칸 값·병합·채우기 색을 읽는다 */
+function readXls(buf) {
+  const wb = cfbStream(buf, ['Workbook', 'Book']);
+  if (!wb || wb.length < 8) throw new Error('엑셀(.xls) 안에서 통합 문서를 찾지 못했습니다.');
+  const dv = new DataView(wb.buffer, wb.byteOffset, wb.byteLength), u16 = o => dv.getUint16(o, true), u32 = o => dv.getUint32(o, true);
+  const recs = []; for (let o = 0; o + 4 <= wb.length;) { const t = u16(o), l = u16(o + 2); if (o + 4 + l > wb.length) break; recs.push({t, o: o + 4, l}); o += 4 + l; }
+  if (!recs.length || recs[0].t !== 0x0809 || u16(recs[0].o) !== 0x0600) throw new Error('엑셀 95 이전 형식(.xls)은 읽을 수 없습니다. 엑셀에서 열어 .xlsx로 다시 저장해 주세요.');
+  const latin1 = b => { let s = ''; for (let k = 0; k < b.length; k += 4096) s += String.fromCharCode.apply(null, b.subarray(k, k + 4096)); return s; };
+  const u16le = b => new TextDecoder('utf-16le').decode(b);
+  const xlStr = (o, cb) => { const cch = cb === 1 ? wb[o] : u16(o), fl = wb[o + cb]; let p = o + cb + 1; if (fl & 8) p += 2; if (fl & 4) p += 4; const n = fl & 1 ? cch * 2 : cch, b = wb.subarray(p, p + n); return fl & 1 ? u16le(b) : latin1(b); };
+  // 공유 문자열표(SST): 글자가 CONTINUE 레코드로 넘어가면 그 첫 바이트가 새 글자 폭 표시
+  const parseSST = idx => {
+    const segs = [wb.subarray(recs[idx].o, recs[idx].o + recs[idx].l)];
+    for (let j = idx + 1; j < recs.length && recs[j].t === 0x003C; j++) segs.push(wb.subarray(recs[j].o, recs[j].o + recs[j].l));
+    let si = 0, p = 8; const out = [], total = segs[0].length >= 8 ? (segs[0][4] | segs[0][5] << 8 | segs[0][6] << 16 | segs[0][7] << 24) >>> 0 : 0;
+    const ok = () => { while (si < segs.length && p >= segs[si].length) { si++; p = 0; } return si < segs.length; };
+    const b8 = () => ok() ? segs[si][p++] : 0, b16 = () => b8() | b8() << 8, b32 = () => (b16() | b16() << 16) >>> 0;
+    const skip = k => { while (k > 0 && ok()) { const t = Math.min(k, segs[si].length - p); p += t; k -= t; } };
+    while (out.length < total && ok()) {
+      const cch = b16(), fl = b8(); let hi = fl & 1; const runs = fl & 8 ? b16() : 0, ext = fl & 4 ? b32() : 0; let s = '', left = cch;
+      while (left > 0) {
+        if (p >= segs[si].length) { si++; p = 0; if (si >= segs.length) break; hi = segs[si][p++] & 1; }
+        const avail = segs[si].length - p, can = Math.min(left, hi ? avail >> 1 : avail);
+        if (can <= 0) { p = segs[si].length; continue; }
+        const b = segs[si].subarray(p, p + (hi ? can * 2 : can)); s += hi ? u16le(b) : latin1(b); p += hi ? can * 2 : can; left -= can;
+      }
+      skip(runs * 4 + ext); out.push(s);
+    }
+    return out;
+  };
+  const rk = q => { const x = dv.getInt32(q, true); let v; if (x & 2) v = x >> 2; else { const t = new DataView(new ArrayBuffer(8)); t.setInt32(4, x & ~3, true); v = t.getFloat64(0, true); } return x & 1 ? v / 100 : v; };
+  const pal = XLS_PAL.slice(), sst = [], xfs = [], fmts = {}, infos = [];
+  let i = 1;
+  for (; i < recs.length; i++) {
+    const r = recs[i], o = r.o;
+    if (r.t === 0x000A) { i++; break; }
+    if (r.t === 0x002F) throw new Error('암호가 걸린 .xls 파일은 읽을 수 없습니다. 엑셀에서 암호를 풀고 .xlsx로 저장해 주세요.');
+    if (r.t === 0x0085) infos.push({pos: u32(o), hidden: (wb[o + 4] & 3) !== 0, dt: wb[o + 5], name: xlStr(o + 6, 1)});
+    else if (r.t === 0x00FC) sst.push(...parseSST(i));
+    else if (r.t === 0x00E0 && r.l >= 20) xfs.push({ifmt: u16(o + 2), fls: (u32(o + 14) >>> 26) & 0x3F, fore: u16(o + 18) & 0x7F});
+    else if (r.t === 0x041E) fmts[u16(o)] = xlStr(o + 2, 2);
+    else if (r.t === 0x0092) { const k = u16(o); for (let j = 0; j < k && j < 56; j++) { const q = o + 2 + j * 4; pal[8 + j] = '#' + [wb[q], wb[q + 1], wb[q + 2]].map(x => x.toString(16).padStart(2, '0')).join('').toUpperCase(); } }
+  }
+  const xf = xfs.map(x => ({date: isDateFmt(x.ifmt, fmts), fill: x.fls === 1 && x.fore < 64 && pal[x.fore] !== '#FFFFFF' ? pal[x.fore] : null}));
+  const byPos = new Map(infos.map(s => [s.pos, s])), used = new Set(), sheets = [];
+  let cur = null;
+  const num = (v, ix) => { const x = xf[ix]; if (x && x.date) return serialDate(v); let s = String(v); if (/\.\d{7,}/.test(s)) s = String(+v.toFixed(6)); return s; };
+  const put = (rw, col, v, ix) => { const row = cur.rows[rw] || (cur.rows[rw] = []); if (v != null) row[col] = v; const x = xf[ix]; if (x && x.fill && col < 8) { const f = cur.fc[rw] || (cur.fc[rw] = {}); f[x.fill] = (f[x.fill] || 0) + 1; } };
+  const finish = () => {
+    const rows = cur.rows; for (let r = 0; r < rows.length; r++) { if (!rows[r]) rows[r] = []; for (let j = 0; j < rows[r].length; j++) if (rows[r][j] == null) rows[r][j] = ''; }
+    const rowFill = rows.map((_, r) => { const f = cur.fc[r]; if (!f) return null; const top = Object.entries(f).sort((a, b) => b[1] - a[1])[0]; return top && top[1] >= 3 ? top[0] : null; });
+    sheets.push({name: cur.info.name || '시트', rows, merges: cur.merges, rowFill, hidden: cur.info.hidden});
+  };
+  for (; i < recs.length; i++) {
+    const r = recs[i], o = r.o;
+    if (r.t === 0x0809) {   // 시트 시작
+      let info = byPos.get(o - 4); if (!info || used.has(info)) info = infos.find(s => !used.has(s) && s.dt === 0) || null;
+      if (info) used.add(info);
+      cur = info && info.dt === 0 && u16(o + 2) === 0x0010 ? {info, rows: [], merges: [], fc: [], pend: null} : null; continue;
+    }
+    if (!cur) continue;
+    switch (r.t) {
+      case 0x000A: finish(); cur = null; break;
+      case 0x00FD: put(u16(o), u16(o + 2), sst[u32(o + 6)] ?? '', u16(o + 4)); break;                                  // LABELSST
+      case 0x0204: put(u16(o), u16(o + 2), xlStr(o + 6, 2), u16(o + 4)); break;                                          // LABEL
+      case 0x0203: put(u16(o), u16(o + 2), num(dv.getFloat64(o + 6, true), u16(o + 4)), u16(o + 4)); break;               // NUMBER
+      case 0x027E: put(u16(o), u16(o + 2), num(rk(o + 6), u16(o + 4)), u16(o + 4)); break;                                // RK
+      case 0x00BD: { const rw = u16(o), c0 = u16(o + 2), cN = u16(o + r.l - 2); for (let c = c0, q = o + 4; c <= cN && q + 6 <= o + r.l - 2; c++, q += 6) put(rw, c, num(rk(q + 2), u16(q)), u16(q)); break; }   // MULRK
+      case 0x0201: put(u16(o), u16(o + 2), null, u16(o + 4)); break;                                                     // BLANK (색만)
+      case 0x00BE: { const rw = u16(o), c0 = u16(o + 2), cN = u16(o + r.l - 2); for (let c = c0, q = o + 4; c <= cN && q + 2 <= o + r.l - 2; c++, q += 2) put(rw, c, null, u16(q)); break; }   // MULBLANK
+      case 0x0205: put(u16(o), u16(o + 2), wb[o + 7] ? '' : wb[o + 6] ? 'TRUE' : 'FALSE', u16(o + 4)); break;           // BOOLERR
+      case 0x0006: {                                                                                                      // FORMULA (저장된 결과값)
+        const rw = u16(o), col = u16(o + 2), ix = u16(o + 4);
+        if (u16(o + 12) === 0xFFFF) { const k = wb[o + 6]; if (k === 0) cur.pend = {rw, col, ix}; else put(rw, col, k === 1 ? (wb[o + 8] ? 'TRUE' : 'FALSE') : '', ix); }
+        else put(rw, col, num(dv.getFloat64(o + 6, true), ix), ix);
+        break;
+      }
+      case 0x0207: if (cur.pend) { put(cur.pend.rw, cur.pend.col, xlStr(o, 2), cur.pend.ix); cur.pend = null; } break;   // STRING (수식 결과 글자)
+      case 0x00E5: { const k = u16(o); for (let j = 0; j < k && o + 2 + j * 8 + 8 <= o + r.l; j++) { const q = o + 2 + j * 8; cur.merges.push({r1: u16(q), r2: u16(q + 2), c1: u16(q + 4), c2: u16(q + 6)}); } break; }   // MERGECELLS
+    }
+  }
+  if (cur) finish();
+  if (!sheets.length) throw new Error('읽을 수 있는 시트가 없습니다.');
+  return sheets;
+}
+/* 세대가 가로(열)로 늘어선 표: 한 행에 동호가 여러 칸 이어지거나, 첫 열에 동·호 머리글이 세로로 있으면 행과 열을 바꾼다 */
+function transposeSheet(sh) {
+  const R = vmRows(sh), W = R.reduce((m, r) => Math.max(m, r ? r.length : 0), 0); if (W < 4) return null;
+  let ur = -1;
+  for (let r = 0; r < Math.min(R.length, 20) && ur < 0; r++) {
+    const row = R[r] || [], filled = row.filter(v => norm(v)).length; let n = 0;
+    for (let c = 1; c < row.length; c++) { const [d, h] = splitDongHo(row[c]); if (d && h && /\d/.test(h)) n++; }
+    if (n >= 4 && n >= (filled - 1) * 0.6) ur = r;
+  }
+  const lab = Array.from({length: R.length}, (_, r) => (R[r] || [])[0] || ''), ic = idCols(lab);
+  if (ur < 0 && !((ic.dong != null && ic.ho != null) || ic.dongho != null)) return null;
+  const rows = []; for (let c = 0; c < W; c++) rows.push(R.map(r => { const v = (r || [])[c]; return v == null ? '' : v; }));
+  if (ur >= 0) { const l = idCols([rows[0][ur]]); if (l.dongho == null && l.ho == null) rows[0][ur] = '동호'; }
+  return {name: sh.name, rows, merges: [], rowFill: [], hidden: sh.hidden, _transposed: true};
+}
 
 /* ───────── structure recognition ───────── */
-const YES = new Set(['1', 'o', 'O', 'ｏ', 'Ｏ', '○', '●', '◎', '◯', 'v', 'V', '✓', '✔', '√', 'y', 'Y', 'TRUE', 'true', '예', '선택']);
-const NO = new Set(['0', 'x', 'X', '×', 'n', 'N', '-', 'FALSE', 'false']);
+const YES = new Set(['1', 'o', 'O', 'ｏ', 'Ｏ', '○', '●', '◎', '◯', '⊙', '◉', 'ㅇ', 'v', 'V', 'ｖ', 'Ｖ', '✓', '✔', '√', '☑', '■', '▣', '◆', '★', 'y', 'Y', 'TRUE', 'true', '예', '선택', '선택함', '신청', '신청함', '유', '있음']);
+const NO = new Set(['0', 'x', 'X', 'ｘ', 'Ｘ', '×', '✕', 'n', 'N', '-', '□', '☐', '◇', '☆', 'FALSE', 'false', '아니오', '아니요', '무', '없음', '미선택', '미신청']);
 const BASE_RE = /^(기본|미선택|미설치|미적용|미시공|미신청|미계약|비확장|미확장|없음|해당\s*없음|표준|일반|무상|선택\s*안|안\s*함)/;
 function fillMerges(sh, upto) {
   const out = []; for (let r = 0; r < Math.min(upto, sh.rows.length); r++) out.push(sh.rows[r].slice());
@@ -1003,11 +1169,12 @@ function idCols(row) {
   const cols = {};
   row.forEach((v, c) => {
     const t = norm(v).replace(/\s/g, ''); if (!t) return;
-    if (cols.dong == null && /^(동|동명|동번호|동수)$/.test(t)) cols.dong = c;
-    else if (cols.ho == null && /^(호|호수|호실|호명|호번호)$/.test(t)) cols.ho = c;
-    else if (cols.dongho == null && /^(동호수|동호|동-호|동\/호|동·호|세대|세대번호|세대명)$/.test(t)) cols.dongho = c;
+    if (cols.dong == null && /^(동|동명|동번호|동수|dong|bldg|building)$/i.test(t)) cols.dong = c;
+    else if (cols.ho == null && /^(호|호수|호실|호명|호번호|ho|unit|unitno|room)$/i.test(t)) cols.ho = c;
+    else if (cols.dongho == null && /^(동호수|동호|동-호|동\/호|동·호|세대|세대번호|세대명|동호번호|dongho)$/i.test(t)) cols.dongho = c;
+    else if (cols.floor == null && /^(층|층수|층번호|floor)$/i.test(t)) cols.floor = c;
     else if (cols.type == null && /^(형|타입|평형|형별|주택형|type|평형타입|주택타입)$/i.test(t)) cols.type = c;
-    else if (cols.name == null && /(계약자|성명|이름|고객명|소유자|입주자|조합원명)/.test(t)) cols.name = c;
+    else if (cols.name == null && /(계약자|성명|이름|고객명|소유자|입주자|조합원명|^name$)/i.test(t)) cols.name = c;
     else if (cols.odate == null && /옵션.*일/.test(t)) cols.odate = c;
     else if (cols.cdate == null && /^계약일/.test(t)) cols.cdate = c;
     else if (cols.memo == null && /^(비고|메모|특이사항|참고)$/.test(t)) cols.memo = c;
@@ -1051,12 +1218,69 @@ function findLegend(sheets) {
 const QTY_BAD = /(층|라인|면적|전용|공급|금액|가격|단가|원\)|\(원|합계|소계|번호|순번|^no|평$|㎡|m2|코드|일자|년도)/i;
 const MEMO_H = /^(비고|메모|특이사항|참고|기타|기타사항|요청사항|특기사항|확인사항)\d*$/;
 const NONOPT_H = /(층|라인|면적|전용|공급|분양|금액|가격|단가|합계|소계|번호|순번|^no$|코드|일자|날짜|년도|전화|연락처|주소|상태|구분|여부)/i;
+const GENERIC_H = /^(선택내용|선택사항|선택|내용|사양|선택사양|옵션|옵션내용|옵션명|품목|선택품목|신청내용|신청사항|구분|값|선택값|계약내용|선택옵션)$/;
+// 세로로 병합된 칸(동별로 병합한 동·타입 칸 등)은 아래 칸도 같은 값으로. 가로 병합은 머리글에서만 의미가 있어 그대로 둠
+function vmRows(sh) {
+  if (sh._vm) return sh._vm;
+  const rows = sh.rows.map(r => (r || []).slice());
+  for (const m of sh.merges || []) {
+    if (m.c1 !== m.c2 || m.r2 <= m.r1) continue;
+    const v = (rows[m.r1] || [])[m.c1]; if (!norm(v)) continue;
+    for (let r = m.r1 + 1; r <= m.r2 && r < rows.length; r++) { if (!rows[r]) rows[r] = []; if (!norm(rows[r][m.c1])) rows[r][m.c1] = v; }
+  }
+  return (sh._vm = rows);
+}
+/* 데이터 행 다듬기 (원본 시트는 그대로, 복사본으로)
+   ① 동 열 없이 '101동' 같은 제목 줄로 나뉜 표(또는 제목에만 동이 적힌 시트) → 제목의 동을 가상 열로 붙임
+   ② 동이 동마다 첫 줄에만 적혀 있으면 아래 줄도 같은 동
+   ③ 층 열이 따로 있고 호 칸에 라인 번호(1~2자리)만 있으면 층×100+라인 (15층 2라인 → 1502) */
+function prepRows(sh, cols, hr) {
+  let rows = vmRows(sh); const C = Object.assign({}, cols), note = [];
+  const W = rows.reduce((m, r) => Math.max(m, r ? r.length : 0), 0);
+  if (C.dong == null && C.dongho == null && C.ho != null) {
+    let cur = '', titles = [];
+    const out = rows.map(row => {
+      const x = (row || []).slice(), cells = x.map(v => norm(v)).filter(Boolean);
+      const t = cells.length && cells.length <= 2 && !/소계|합계|^계$|누계/.test(cells.join(' ')) ? cells[0].match(/^[\s\[(【<〈《「『■□▣▶▷►▸●○◎◆◇※·•\-]*(?:\d{1,2}[.)]\s+)?(\d{2,4}|[A-Za-z])\s*동(?![가-힣])/) : null;
+      if (t) { cur = /^\d+$/.test(t[1]) ? String(parseInt(t[1], 10)) : t[1].toUpperCase(); titles.push(cur); x[W] = ''; return x; }
+      x[W] = cur; return x;
+    });
+    if (titles.length) {
+      rows = out; C.dong = W; C._vdong = true;
+      const ds = [...new Set(titles)];
+      note.push(ds.length > 1 ? `동 열이 없어 '${ds[0]}동', '${ds[1]}동' 같은 제목 줄로 동을 나눴습니다 (${ds.length}개 동).` : `동 열이 없어 제목에 적힌 ${ds[0]}동으로 넣었습니다.`);
+    }
+  }
+  if (C.dong != null && !C._vdong && C.ho != null) {
+    let last = '', n = 0;
+    const out = rows.map((row, r) => {
+      if (r <= hr || !row) return row;
+      const d = norm(row[C.dong]), h = norm(row[C.ho]);
+      if (d) { last = /합계|소계|누계|^계$/.test(d) || !/\d|^[A-Za-z]{1,2}$|^[가-힣A-Za-z]{1,3}동$/.test(d) ? '' : d; return row; }
+      if (last && /\d/.test(h)) { const x = row.slice(); x[C.dong] = last; n++; return x; }
+      return row;
+    });
+    if (n) { rows = out; note.push(`동이 동마다 첫 줄에만 적혀 있어 아래 ${fmt(n)}줄에도 같은 동을 넣었습니다.`); }
+  }
+  if (C.floor != null && C.ho != null) {
+    let n = 0;
+    const out = rows.map((row, r) => {
+      if (r <= hr || !row) return row;
+      const f = norm(row[C.floor]).replace(/\s*층$/, ''), h = norm(row[C.ho]).replace(/\s*(호|라인)$/, '');
+      if (/^\d{1,3}$/.test(f) && /^\d{1,2}$/.test(h)) { const x = row.slice(); x[C.ho] = String(parseInt(f, 10) * 100 + parseInt(h, 10)); n++; return x; }
+      return row;
+    });
+    if (n) { rows = out; note.push(`층과 호(라인)가 따로 적혀 있어 '15층 2호 → 1502호'처럼 합쳤습니다.`); }
+  }
+  return {rows, cols: C, note};
+}
 function autoMap(sh) {
-  const rows = sh.rows, H = fillMerges(sh, 40), legend = sh._legend || null;
+  const H = fillMerges(sh, 40), legend = sh._legend || null;
   let hr = -1, cols = null;
   for (let r = 0; r < H.length && hr < 0; r++) { const c = idCols(H[r]); if ((c.dong != null && c.ho != null) || c.dongho != null) { hr = r; cols = c; } }
   if (hr < 0) for (let r = 0; r < H.length && hr < 0; r++) { const c = idCols(H[r]); if (c.ho != null) { hr = r; cols = c; } }
   if (hr < 0) return null;
+  const P = prepRows(sh, cols, hr), rows = P.rows, note = P.note; cols = P.cols;
   const keyCol = cols.ho != null ? cols.ho : cols.dongho;
   let ds = -1;
   for (let r = hr + 1; r < Math.min(rows.length, hr + 12); r++) { if (/\d/.test((rows[r] || [])[keyCol] || '')) { ds = r; break; } }
@@ -1069,7 +1293,7 @@ function autoMap(sh) {
     const hrow = H[hr].map(v => norm(v).replace(/\s/g, ''));
     const find = re => { const i = hrow.findIndex((t, c) => re.test(t) && !ids.has(c)); return i >= 0 ? i : undefined; };
     const cat = find(/^(옵션구분|구분|옵션분류|분류|품목구분|항목구분|카테고리|옵션종류|종류|옵션항목)$/), item = find(/^(선택품목|옵션명|품목명|품목|선택사양|사양|옵션|선택옵션|선택내용|옵션내용|내용|선택항목|세부품목|세부항목)$/), qty = find(/^(수량|개수|대수)/), price = find(/^(금액|가격|단가|옵션금액)/);
-    if (item != null || cat != null) return {long: true, dataStart: ds, cols: Object.assign({}, cols, {cat, item: item != null ? item : cat, qty, price})};
+    if (item != null || cat != null) return {long: true, dataStart: ds, cols: Object.assign({}, cols, {cat, item: item != null ? item : cat, qty, price}), rows, note};
   }
   const width = rows.reduce((m, r) => Math.max(m, r.length), 0);
   const hText = c => { const p = []; for (let r = hr; r < ds; r++) { const v = norm((H[r] || [])[c]); if (v && !p.includes(v)) p.push(v); } return p.join(' '); };
@@ -1119,17 +1343,22 @@ function autoMap(sh) {
     if (kind[c] === 'value' || kind[c] === 'multi' || kind[c] === 'codes') { options.push({name: uniq(top), kind: kind[c], col: c}); cur = null; prevTop = null; continue; }
     if (kind[c] === 'qty') { const m = top.match(/^(.*?)\s*[(（]\s*([^)）]{1,4})\s*[)）]\s*$/); options.push({name: uniq(m ? m[1] : top), kind: 'value', col: c, unit: m ? m[2] : ''}); cur = null; prevTop = null; continue; }
     const unc = p.some(x => /미체결|미계약/.test(x));
-    const leaf = p.length > 1 ? p[p.length - 1].replace(/^\d+\s*[.)]\s*/, '') : '선택';
+    let leaf = p.length > 1 ? p[p.length - 1].replace(/^\d+\s*[.)]\s*/, '') : '선택';
+    if (/^((선택|신청|적용|설치|시공|계약)?(여부|유무)|선택|신청|체크|선택함|신청함|선택\(o\)|o\/x)$/i.test(leaf.replace(/\s/g, ''))) leaf = '선택';   // '선택여부(O/X)' 칸
     const ord = p.length > 1 && /^(\d+)\s*[.)]/.test(p[p.length - 1]) ? +RegExp.$1 : null;
     if (!cur || prevTop !== top) { cur = {name: uniq(top), kind: 'mark', choices: []}; options.push(cur); prevTop = top; }
     cur.choices.push({col: c, name: leaf, unc, ord});
   }
   options.forEach(o => { if (o.kind === 'mark' && o.choices.every(c => c.ord != null)) o.choices.sort((a, b) => a.ord - b.ord); });
   if (!options.length) return null;
-  return {dataStart: ds, cols, options};
+  // 옵션마다 시트를 따로 둔 파일: 칸 이름이 '선택내용'처럼 일반적이면 시트 이름을 옵션 이름으로
+  if (options.length === 1 && GENERIC_H.test(norm(options[0].name).replace(/\s/g, '')) && norm(sh.name) && !/^(sheet|시트)\s*\d*$/i.test(norm(sh.name))) options[0].name = norm(sh.name);
+  return {dataStart: ds, cols, options, rows, note};
 }
 function splitDongHo(v) {
-  const m = norm(v).match(/([0-9A-Za-z가-힣]+?)\s*동?\s*[-–/ ]\s*([0-9A-Za-z]+)\s*호?$/) || norm(v).match(/^(\d{3,4})동\s*(\d{3,4})호?$/);
+  const s = norm(v);
+  const m = s.match(/([0-9A-Za-z가-힣]+?)\s*동?\s*[-–/ .·_]\s*([0-9A-Za-z]+)\s*호?$/) || s.match(/^([0-9A-Za-z]{1,4})동\s*([0-9A-Za-z]{1,5})호?$/)
+    || s.match(/^(\d{3})(\d{3,4})$/) || s.match(/^(\d{4})(\d{4})$/);   // 숫자만 붙은 동호: 1011502 → 101·1502, 01011502 → 0101·1502
   return m ? [m[1], m[2]] : [null, null];
 }
 const cleanNo = (v, suffix) => { let s = norm(v).replace(new RegExp(suffix + '$'), '').trim(); if (/^\d+$/.test(s)) s = String(parseInt(s, 10)); return s; };
@@ -1180,8 +1409,10 @@ function pivotItems(per, order, nextId) {
   }
   return options;
 }
+// autoMap이 다듬은 행을 그대로 쓰고, 직접 지정(열 직접 지정)일 때는 여기서 다듬는다
+const mapRows = (sh, map) => map.rows ? {rows: map.rows, cols: map.cols, note: map.note || []} : prepRows(sh, map.cols, (map.dataStart || 0) - 1);
 function applyLong(sh, map) {
-  const rows = sh.rows, C = map.cols, per = new Map(), order = []; let lines = 0;
+  const P = mapRows(sh, map), rows = P.rows, C = P.cols, per = new Map(), order = []; let lines = 0;
   for (let r = map.dataStart; r < rows.length; r++) {
     const row = rows[r]; if (!row) continue;
     const u0 = rowUnit(row, C); if (!u0) continue;
@@ -1195,9 +1426,9 @@ function applyLong(sh, map) {
     if (!order.includes(cat)) order.push(cat);
   }
   let on = 0; const options = pivotItems(per, order, () => 'o' + (++on)), units = [...per.values()].map(e => e.u);
-  const warn = [`한 줄에 옵션 하나씩 적힌 세로형 표로 보고, ${fmt(lines)}줄을 ${fmt(units.length)}세대로 묶었습니다.`];
+  const warn = [`한 줄에 옵션 하나씩 적힌 세로형 표로 보고, ${fmt(lines)}줄을 ${fmt(units.length)}세대로 묶었습니다.`, ...P.note];
   if (C.dong == null && C.dongho == null) warn.push('동 열이 없어 모든 호실을 한 동(본동)으로 묶었습니다.');
-  return {options, flags: [], units, warn, flagCol: false};
+  return {options, flags: [], units, warn, flagCol: false, long: true};
 }
 // 머리글 위 안내문('노란색은 변경계약 세대' 등)의 색 이름으로 행 색 표시에 이름 붙이기
 const HUES = [['빨간|빨강|적색|레드', 0], ['주황|오렌지', 30], ['노란|노랑|황색|옐로', 60], ['연두', 90], ['초록|녹색|그린', 120], ['하늘|청록|민트', 190], ['파란|파랑|청색|블루', 225], ['보라|자주|퍼플', 275], ['분홍|핑크', 330]];
@@ -1242,7 +1473,7 @@ function markDetails(opts) {
 }
 function applyMap(sh, map) {
   if (map.long) return applyLong(sh, map);
-  const rows = sh.rows, C = map.cols, warn = [], legend = sh._legend || null, keyCol = C.ho != null ? C.ho : C.dongho;
+  const P = mapRows(sh, map), rows = P.rows, C = P.cols, warn = [...P.note], legend = sh._legend || null, keyCol = C.ho != null ? C.ho : C.dongho;
   let on = 0; const nextId = () => 'o' + (++on), options = [];
   markDetails(map.options);
   map.options.forEach(mo => {
@@ -1575,32 +1806,68 @@ function exportHist() {
 // 파일 하나를 읽어 시트마다 자동 인식까지 마친 가져오기 상태를 돌려준다 (백업 .json은 여기로 오지 않음)
 async function parseImportFile(file) {
   const buf = await file.arrayBuffer(); let sheets;
-  if (/\.(xlsx|xlsm)$/i.test(file.name)) sheets = await readXlsx(buf);
-  else if (/\.pdf$/i.test(file.name)) sheets = await readPdf(buf, file.name);
-  else if (/\.xls$/i.test(file.name)) throw new Error('구형 .xls 파일은 읽을 수 없습니다. 엑셀에서 .xlsx로 다시 저장해 주세요.');
+  // 확장자보다 내용으로 판단: 웹 시스템에서 받은 '.xls'는 HTML 표나 텍스트인 경우가 많고, 이름만 .xls인 .xlsx도 있음
+  const sig = [...new Uint8Array(buf.slice(0, 8))].map(b => b.toString(16).padStart(2, '0')).join('');
+  const head = new TextDecoder('utf-8').decode(buf.slice(0, 2048)).replace(/^﻿/, '').trimStart().slice(0, 600).toLowerCase();
+  if (sig.startsWith('504b0304')) sheets = await readXlsx(buf);
+  else if (sig === 'd0cf11e0a1b11ae1') sheets = readXls(buf);
+  else if (sig.startsWith('25504446') || /\.pdf$/i.test(file.name)) sheets = await readPdf(buf, file.name);
+  else if (/^<|<table|<html/.test(head)) sheets = readHtmlXls(buf, file.name);
   else sheets = [readCsv(buf, file.name)];
   const legend = findLegend(sheets); if (legend) sheets.forEach(sh => { if (sh.name !== legend.sheet) sh._legend = legend; });
   const imp = {file: file.name, size: file.size, mtime: file.lastModified, sheets, si: 0, mask: !!window.__maskDefault, mode: null, addOpts: true, pname: file.name.replace(/\.[^.]+$/, '').slice(0, 60), pdf: /\.pdf$/i.test(file.name)};
   let best = -1, bn = 0;   // 세대가 가장 많은 시트, 단 숨김 시트(다른 현장 자료가 남아 있는 경우가 많음)는 보이는 시트가 없을 때만
   sheets.forEach((sh, i) => { try { const m = autoMap(sh); if (m) { const r = applyMap(sh, m); sh._auto = {m, r}; const sc = r.units.length ? r.units.length + (sh.hidden ? 0 : 1e7) : 0; if (sc > bn) { bn = sc; best = i; } } } catch (e) {} });
+  if (best < 0) sheets.forEach((sh, i) => {   // 아무 시트도 못 읽었으면 행·열이 뒤바뀐 표인지
+    if (best >= 0) return;
+    try { const t = transposeSheet(sh); if (!t) return; const m = autoMap(t); if (!m) return; const r = applyMap(t, m); if (!r.units.length) return; r.warn.unshift('세대가 가로(열)로 늘어선 표로 보고, 행과 열을 바꿔서 읽었습니다.'); t._auto = {m, r}; sheets[i] = t; best = i; } catch (e) {}
+  });
   if (best >= 0 && imp.pdf && sheets[best]._auto.r.options.some(o => /계약\s*(미)?체결|^옵션 [A-Z]+$/.test(o.name))) { imp.si = best; imp.mm = mmFrom(sheets[best]._auto.m); imp.mm.text = ''; imp.mmOpen = true; sheets.forEach(sh => delete sh._auto); best = -2; }
-  if (best >= 0) { imp.si = best; imp.res = sheets[best]._auto.r; imp.via = 'auto'; imp.mm = mmFrom(sheets[best]._auto.m); }
+  if (best >= 0) { imp.si = best; imp.res = sheets[best]._auto.r; imp.via = 'auto'; imp.mm = mmFrom(sheets[best]._auto.m); const g = sheetGroup(sheets, best); if (g.idx.length > 1) imp.autoMerge = g; }
   else if (best === -2) imp.err = 'PDF에서 표는 읽었지만, 여러 줄로 병합된 머리글을 옵션별로 묶지 못했습니다. ' + (S.sample ? '‘Claude로 구조 분석’이나 ' : '') + '아래 ‘열 직접 지정’을 사용해 주세요.';
   else { imp.err = '표 구조를 자동으로 찾지 못했습니다. 동·호(또는 호실) 열이 있는 시트인지 확인하거나 아래 ‘열 직접 지정’을 사용해 주세요.'; imp.mm = mmFrom(null); imp.mmOpen = true; }
   return imp;
+}
+/* 한 파일 안에서 옵션별(같은 세대, 다른 옵션) 또는 동별(다른 세대, 같은 옵션)로 나뉜 시트 묶음 찾기.
+   '전체' 시트와 그 일부인 공구별 시트, 원본·수정본처럼 내용이 겹치는 시트는 묶지 않는다 */
+function sheetGroup(sheets, best) {
+  const R = i => sheets[i]._auto && sheets[i]._auto.r, nsp = s => norm(s).replace(/\s/g, '');
+  const keys = i => { const r = R(i), dg = r.units.some(u => u.d === '본동') ? inferDong({sheets, si: i, file: ''}) : ''; return new Set(r.units.map(u => (u.d === '본동' && dg ? dg : u.d) + '-' + u.h)); };
+  const opts = i => new Set(R(i).options.map(o => nsp(o.name)));
+  const idx = [best], kinds = new Set(); let U = keys(best), O = opts(best);
+  sheets.forEach((sh, i) => {
+    if (i === best || sh.hidden || !R(i) || !R(i).units.length || !!R(i).long !== !!R(best).long) return;
+    const K = keys(i), Q = opts(i), both = [...K].filter(k => U.has(k)).length, kOv = both / Math.max(1, Math.min(K.size, U.size)), oOv = [...Q].filter(q => O.has(q)).length / Math.max(1, Math.min(Q.size, O.size));
+    // 옵션별: 세대 대부분이 겹치고(지금까지 묶은 세대의 절반 이상) 옵션은 하나도 안 겹침 — 집계 시트의 '변경사항' 같은 작은 표는 제외
+    // 동별: 세대가 거의 안 겹치고 옵션은 대부분 같음 (5세대 이상)
+    const byOpt = kOv >= 0.6 && both >= U.size * 0.5 && oOv === 0, byDong = kOv <= 0.1 && K.size >= 5 && oOv >= 0.6;
+    if (!byOpt && !byDong) return;
+    idx.push(i); kinds.add(byOpt ? 'opt' : 'dong'); K.forEach(k => U.add(k)); Q.forEach(q => O.add(q));
+  });
+  return {idx: idx.sort((a, b) => a - b), kind: kinds.size === 1 ? [...kinds][0] : 'mix'};
+}
+// 옵션별·동별로 나뉜 시트는 처음부터 합쳐서 보여 줌 (합치기 화면에서 시트를 빼거나 순서를 바꿀 수 있음)
+function expandAuto(p) {
+  if (!p || !p.autoMerge) return [p];
+  const g = p.autoMerge; delete p.autoMerge;
+  const ps = sheetParts(p, g.idx), names = g.idx.map(i => p.sheets[i].name);
+  ps.autoNote = `‘${p.base || p.file}’ 파일의 시트 ${g.idx.length}개(${names.slice(0, 4).join(', ')}${names.length > 4 ? ' 외' : ''})가 ${g.kind === 'opt' ? '옵션별로' : g.kind === 'dong' ? '동별로' : '옵션·동별로'} 나뉘어 있어 한 단지로 합쳤습니다.`;
+  return ps;
 }
 async function loadImport(file) {
   S.mg.imp = {file: file.name, busy: '파일을 읽는 중입니다…'}; render();
   try {
     if (/\.json$/i.test(file.name)) { const buf = await file.arrayBuffer(); let j; try { j = JSON.parse(new TextDecoder().decode(buf)); } catch (e) { throw new Error('백업 파일을 읽지 못했습니다.'); } await importBackup(j); return; }
-    S.mg.imp = await parseImportFile(file);
+    const p = await parseImportFile(file);
+    if (p.autoMerge) { const ps = expandAuto(p), sh = newShell(p); sh.parts = ps; sh.autoNote = ps.autoNote; remerge(sh); S.mg.imp = sh; }
+    else S.mg.imp = p;
   } catch (e) { S.mg.imp = {file: file.name, fatal: (e && e.message) || '파일을 읽지 못했습니다.'}; }
   render();
 }
 
 /* ── 나뉜 파일(또는 시트) 여러 개를 한 단지로 합치기 ──
    같은 동·호는 한 세대로, 이름이 같은 옵션은 한 항목으로 묶는다. 같은 칸의 값이 서로 다르면 아래쪽(나중) 파일을 따른다. */
-const IMP_ACCEPT = '.xlsx,.xlsm,.csv,.tsv,.txt,.pdf';
+const IMP_ACCEPT = '.xlsx,.xlsm,.xls,.csv,.tsv,.txt,.htm,.html,.pdf';
 const impNow = () => { const i = S.mg.imp; return i && i.multi && i.focus != null && i.parts[i.focus] ? i.parts[i.focus] : i; };
 const partOK = p => !!(p && p.res && p.res.units.length);
 const newShell = base => ({multi: true, parts: [], focus: null, mask: base ? !!base.mask : !!window.__maskDefault, mode: base && base.modeSet ? base.mode : null, modeSet: !!(base && base.modeSet), addOpts: base ? base.addOpts !== false : true, pnameAuto: !(base && base.pnameAuto === false), pname: (base && base.pname) || ''});
@@ -1622,7 +1889,8 @@ async function loadImports(files, base) {
     shell.busy = `파일을 읽는 중입니다… ${todo.length > 1 ? `(${i + 1}/${todo.length}) ` : ''}${todo[i].name}`; render();
     let p; try { p = await parseImportFile(todo[i]); } catch (e) { p = {file: todo[i].name, size: todo[i].size, mtime: todo[i].lastModified, fatal: (e && e.message) || '파일을 읽지 못했습니다.'}; }
     if (S.mg.imp !== shell) return;   // 그 사이 '처음부터'를 눌렀음
-    shell.parts.push(p);
+    if (p.autoMerge) { const ps = expandAuto(p); shell.autoNote = [shell.autoNote, ps.autoNote].filter(Boolean).join(' '); shell.parts.push(...ps); }
+    else shell.parts.push(p);
   }
   shell.busy = ''; shell.skipped = skipped;
   if (shell.parts.length <= 1) { const one = toSingle(shell); S.mg.imp = one || {file: files[0].name, fatal: skipped.join(' / ') || '가져올 파일이 없습니다.'}; if (one && skipped.length) toast(skipped.join(' / ')); render(); return; }
@@ -1850,20 +2118,21 @@ function vLocalInfo() {
     <p class="${stale ? 'warnline' : 'muted'}" style="font-size:13px">이 단지 마지막 백업: ${lb ? `${esc(fmtTime(lb))} (${days === 0 ? '오늘' : days + '일 전'})` : '아직 없음'}</p>
     ${iosOldInstall() ? iosOldHTML() : ''}
     <div class="row"><button class="btn${stale && !iosOldInstall() ? ' pri' : ''}" data-act="proj-export">이 단지 백업 파일 저장</button>${Object.keys(S.projects).length > 1 || iosOldInstall() ? `<button class="btn${iosOldInstall() ? ' pri' : ''}" data-act="all-export">모든 단지 백업 (${Object.keys(S.projects).length}개, 한 파일)</button>` : ''}${li.persisted === false ? `<button class="btn" data-act="li-persist">지워지지 않게 보호 요청</button>` : ''}</div>
-    <p class="hint">휴대폰을 바꾸거나, 앱(아이콘)을 지우거나, 브라우저 데이터를 지우면 사라집니다. 백업 파일은 위 '파일에서 가져오기'로 언제든 복원됩니다 (모든 단지 백업 파일은 단지가 한꺼번에 복원됨).${li.persisted === true ? ' 저장 공간 보호: 켜짐.' : ''}</p>
+    <p class="hint">앱이 업데이트돼도 자료는 그대로입니다. 휴대폰을 바꾸거나, 앱(아이콘)을 지우거나, 브라우저 데이터를 지우면 사라집니다. 백업 파일에는 시공 체크와 현장 사진도 들어가고, 위 '파일에서 가져오기'로 언제든 복원됩니다 (모든 단지 백업 파일은 단지가 한꺼번에 복원됨).${li.persisted === true ? ' 저장 공간 보호: 켜짐.' : ''}</p>
     ${li.about ? `<p class="faint" style="font-size:12px;margin:0">${esc(li.about)}</p>` : ''}</div></section>`;
 }
 const L0 = v => v == null ? '' : colLetter(v);
 function mmFrom(map) {
   if (!map) return {start: '', dong: '', ho: '', dongho: '', type: '', name: '', text: ''};
   const c = map.cols;
-  return {start: String(map.dataStart + 1), dong: L0(c.dong), ho: L0(c.ho), dongho: L0(c.dongho), type: L0(c.type), name: L0(c.name), _c: c,
+  return {start: String(map.dataStart + 1), dong: c._vdong ? '' : L0(c.dong), ho: L0(c.ho), dongho: L0(c.dongho), type: L0(c.type), name: L0(c.name), _c: c,
     text: (map.options || []).map(o => o.kind !== 'mark' ? o.name + ': ' + L0(o.col) : o.name + ': ' + o.choices.map(x => L0(x.col) + '=' + x.name + (x.unc ? '*' : '')).join(' | ')).join('\n')};
 }
 function runManual() {
   const imp = impNow(), mm = imp.mm, sh = imp.sheets[imp.si], col = v => { const i = colIndex(v || ''); return i >= 0 ? i : undefined; };
   const cols = Object.assign({}, mm._c || {}, {dong: col(mm.dong), ho: col(mm.ho), dongho: col(mm.dongho), type: col(mm.type), name: col(mm.name)});
   Object.keys(cols).forEach(k => { if (cols[k] == null) delete cols[k]; });
+  delete cols._vdong;   // 제목 줄로 만든 가상 동 열은 다시 읽을 때 새로 만든다
   imp.err = '';
   if (cols.ho == null && cols.dongho == null) { imp.err = '호 열(또는 동호가 합쳐진 열)을 알파벳으로 입력해 주세요. 동 열이 없으면 비워 두세요.'; return; }
   const start = parseInt(mm.start, 10); if (!(start >= 1)) { imp.err = '첫 세대가 있는 행 번호를 입력해 주세요.'; return; }
@@ -1886,18 +2155,51 @@ function runManual() {
 /* ── 새로 받은 자료와 현재 단지 대조 ── */
 const nk = s => norm(s).replace(/\s/g, '').toLowerCase();
 function matchByName(list, name) { const ex = list.find(x => nk(x.name) === nk(name)); if (ex) return ex; const c = list.filter(x => nk(shortName(x.name)) === nk(shortName(name))); return c.length === 1 ? c[0] : null; }
+// 이름만 다른 같은 선택지 찾기 (앱이 읽는 방식이 바뀌었거나 분양사무소가 이름만 고친 경우)
+// pairs: 같은 세대의 [새 자료·옮겨 올 쪽 선택지, 이 단지 선택지]. open: 이름으로 짝을 못 찾은 앞쪽, taken: 이미 이름으로 짝지어진 뒤쪽
+// a인 세대가 거의 다(90%) 지금 b이고 b인 세대도 거의 다 a이면, a와 b는 이름만 다른 같은 선택지로 본다 → [[a, b, 세대 수]]
+// 한 세대뿐인 짝은 같은 옵션에서 다른 선택지도 이름이 바뀐 경우에만 인정한다 (한 세대만 진짜로 바뀐 것과 구별)
+function relabelPairs(pairs, open, taken) {
+  const P = new Map(), aT = new Map(), bT = new Map(), best = new Map(), cnt = new Map();
+  pairs.forEach(([a, b]) => { bT.set(b, (bT.get(b) || 0) + 1); if (!open.has(a)) return; aT.set(a, (aT.get(a) || 0) + 1); const k = a + '\u0001' + b; P.set(k, (P.get(k) || 0) + 1); });
+  for (const [k, n] of P) { const i = k.indexOf('\u0001'), a = k.slice(0, i), cur = best.get(a); if (!cur || n > cur[1]) best.set(a, [k.slice(i + 1), n]); }
+  let cand = [];
+  for (const [a, [b, n]] of best) if (!taken.has(b) && n >= 0.9 * aT.get(a) && n >= 0.9 * (bT.get(b) || 0)) cand.push([a, b, n]);
+  cand.forEach(x => cnt.set(x[1], (cnt.get(x[1]) || 0) + 1)); cand = cand.filter(x => cnt.get(x[1]) === 1);   // 하나가 둘로 나뉜 건 이름 바뀜이 아님
+  const strong = cand.some(x => x[2] >= 2);
+  return cand.filter(x => x[2] >= 2 || strong);
+}
 function namesMasked() { const ns = units().list.filter(u => u.n); return ns.length > 0 && ns.filter(u => u.n.includes('*')).length / ns.length > 0.5; }
 function overlapRatio(res) { const {map} = units(); return res.units.length ? res.units.filter(nu => map.has(nu.d + '-' + nu.h)).length / res.units.length : 0; }
 function optMatchRate(res) { const cur = opts(), used = new Set(); let hit = 0; res.options.forEach(no => { const o = matchByName(cur.filter(x => !used.has(x.id)), no.name); if (o) { used.add(o.id); hit++; } }); return res.options.length ? hit / res.options.length : 0; }
-function computeDiff(res, mask) {
-  const cur = opts(), {list, map} = units(), used = new Set(), omap = {}, newOpts = [], newCh = [];
+function computeDiff(res, mask, noRen) {
+  const cur = opts(), {list, map} = units(), used = new Set(), omap = {}, newOpts = [], newCh = [], renames = [];
   res.options.forEach(no => {
     const o = matchByName(cur.filter(x => !used.has(x.id)), no.name);
     if (o) used.add(o.id); else newOpts.push(no);
     const cmap = {}, nc = [];
-    no.choices.forEach(c => { const mc = o && matchByName(o.choices, c.name); if (mc) cmap[c.id] = mc.id; else if (o) { nc.push(c); newCh.push({o, c}); } });
+    no.choices.forEach(c => { const mc = o && matchByName(o.choices, c.name); if (mc) cmap[c.id] = mc.id; else if (o) nc.push(c); });
     omap[no.id] = {o, no, cmap, nc};
   });
+  // 같은 선택지인데 새 자료 이름에 설명이 붙은 경우(예: 선택1 → 선택1 (2대:거실,안방), 앱이 더 자세히 읽게 된 경우): 이름을 새 자료대로
+  if (!noRen) res.options.forEach(no => {
+    const mp = omap[no.id]; if (!mp.o) return;
+    const by = new Map(); no.choices.forEach(c => { const id = mp.cmap[c.id]; if (id) by.set(id, (by.get(id) || []).concat([c])); });
+    for (const [cid, cs] of by) {
+      const c = cs[0], old = chName(mp.o, cid); if (cs.length !== 1 || nk(old) === nk(c.name) || !splitName(c.name)[1]) continue;
+      renames.push({oid: mp.o.id, on: mp.o.name, cid, from: old, to: c.name, n: res.units.filter(nu => nu.s[no.id] === c.id).length});
+    }
+  });
+  // 선택지 이름만 바뀐 것: 세대 값은 그대로 두고 이름만 새 자료대로 고친다 → 시공 완료가 재시공으로 잘못 바뀌지 않음
+  if (!noRen) res.options.forEach(no => {
+    const mp = omap[no.id]; if (!mp.o || !mp.nc.length) return;
+    const pairs = []; res.units.forEach(nu => { const u = map.get(nu.d + '-' + nu.h), ns = nu.s[no.id], cs = u ? sel(u, mp.o) : null; if (ns != null && cs != null) pairs.push([ns, cs]); });
+    relabelPairs(pairs, new Set(mp.nc.map(c => c.id)), new Set(Object.values(mp.cmap))).forEach(([ncid, cid, n]) => {
+      const c = mp.nc.find(x => x.id === ncid); mp.cmap[ncid] = cid; mp.nc = mp.nc.filter(x => x.id !== ncid);
+      renames.push({oid: mp.o.id, on: mp.o.name, cid, from: chName(mp.o, cid), to: c.name, n});
+    });
+  });
+  res.options.forEach(no => { const mp = omap[no.id]; if (mp.o) mp.nc.forEach(c => newCh.push({o: mp.o, c})); });
   const matchRate = res.options.length ? (res.options.length - newOpts.length) / res.options.length : 0;
   const masked = !!mask || namesMasked(), changes = [], added = [], keys = new Set(); let skipped = 0, keptFlag = 0, matched = 0, cells = 0;
   // 행 색으로 표시된 자료: 같은 색끼리 맞춰 비교. 새 자료에 없는 색(직접 붙인 표시)은 건드리지 않음
@@ -1928,11 +2230,11 @@ function computeDiff(res, mask) {
     if (nu.c != null && nu.c !== u.c) items.push({kind: 'field', f: 'c', lab: '옵션계약', from: cText(u.c), to: cText(nu.c), val: nu.c});
     if (items.length) changes.push({key: k, nu, items});
   });
-  return {omap, newOpts, newCh, matchRate, changes, added, missing: list.filter(u => !keys.has(ukey(u))), skipped, keptFlag, masked, matched, cells};
+  return {omap, newOpts, newCh, renames, matchRate, changes, added, missing: list.filter(u => !keys.has(ukey(u))), skipped, keptFlag, masked, matched, cells};
 }
 function getDiff(imp) {
-  const key = S.pid + '|' + S.ver + '|' + (imp.mask ? 1 : 0);
-  if (!imp._diff || imp._dres !== imp.res || imp._dkey !== key) { imp._dres = imp.res; imp._dkey = key; imp._diff = computeDiff(imp.res, imp.mask); }
+  const key = S.pid + '|' + S.ver + '|' + (imp.mask ? 1 : 0) + (imp.noRen ? '|r' : '');
+  if (!imp._diff || imp._dres !== imp.res || imp._dkey !== key) { imp._dres = imp.res; imp._dkey = key; imp._diff = computeDiff(imp.res, imp.mask, imp.noRen); }
   return imp._diff;
 }
 function diffItems(df, imp) { const out = []; df.changes.forEach(c => c.items.forEach(it => { if (it.kind !== 'newopt' || imp.addOpts !== false) out.push([c.key, it.lab + (it.kind === 'newopt' ? ' (새 옵션)' : ''), 'from' in it ? it.from : it.fromName, 'to' in it ? it.to : it.toName]); })); return out; }
@@ -1947,6 +2249,12 @@ function diffView(df, imp) {
     const brk = [[opt, '옵션이 바뀐 세대'], [fresh, '옵션을 새로 계약한 세대'], [name, '계약자가 바뀐 세대'], [flag, '색상 표시가 바뀐 세대']].filter(x => x[0]);
     if (brk.length > 1) h += `<p class="hint num" style="margin:0">${brk.map(x => `${x[1]} <b>${fmt(x[0])}</b>`).join(' · ')}</p>`;
   }
+  if (df.renames.length || imp.noRen) {
+    const R = df.renames;
+    h += `<div class="steps" style="gap:4px"><label class="row"><input type="checkbox" id="diffRen" data-ch="diff-ren"${imp.noRen ? '' : ' checked'}> <span><b>이름만 바뀐 선택지는 같은 것으로 보기</b>${R.length ? ` · ${fmt(R.length)}개` : ''}</span></label>`
+      + (R.length ? `<p class="hint" style="margin:0">세대마다 그대로 짝지어지는 선택지입니다. 세대 값은 두고 선택지 이름만 새 자료대로 고치므로 시공 체크가 그대로 남습니다.</p><ul class="hint" style="margin:0;padding-left:20px">${R.slice(0, 30).map(r => `<li>${esc(shortName(r.on))}: ${esc(r.from)} → <b>${esc(r.to)}</b> (${fmt(r.n)}세대)</li>`).join('')}${R.length > 30 ? `<li>…외 ${R.length - 30}개</li>` : ''}</ul>`
+        : `<p class="hint" style="margin:0">꺼 두면 이름이 바뀐 선택지도 바뀐 항목으로 보고, 시공 완료한 세대는 재시공으로 표시됩니다.</p>`) + `</div>`;
+  }
   if (df.matchRate < 0.5) {
     const nNew = df.changes.reduce((s, c) => s + c.items.filter(it => it.kind === 'newopt').length, 0);
     // 세대는 거의 같고 옵션만 다르면: 같은 단지의 다른 옵션 파일(2차 옵션 등)일 가능성이 큼
@@ -1960,9 +2268,11 @@ function diffView(df, imp) {
   if (df.newCh.length) h += `<p class="hint">새 선택지 ${esc(df.newCh.map(x => shortName(x.o.name) + ' ' + x.c.name).join(', '))}은(는) 반영할 때 옵션 구성에 함께 추가됩니다.</p>`;
   if (df.skipped) h += `<p class="hint">새 자료에 표시가 없는 옵션 값 ${fmt(df.skipped)}건은 지금 값을 그대로 둡니다.</p>`;
   if (df.keptFlag) h += `<p class="hint">이미 다른 색상 표시가 붙어 있는 ${fmt(df.keptFlag)}세대는 그 표시를 그대로 둡니다 (한 세대에 표시는 하나).</p>`;
-  if (rows.length) {
-    h += `<div class="scroll-x" data-scroll="diff" style="max-height:300px;overflow-y:auto;border:1px solid var(--line-2);border-radius:6px"><table class="grid"><thead><tr><th class="stick">세대</th><th>항목</th><th>지금</th><th>새 자료</th></tr></thead><tbody>${rows.slice(0, 400).map(r => `<tr><th class="stick mono">${esc(r[0])}</th><td style="text-align:left">${esc(r[1])}</td><td style="text-align:left;color:var(--ink-2)">${esc(r[2] || '—')}</td><td style="text-align:left;font-weight:600">${esc(r[3] || '—')}</td></tr>`).join('')}</tbody></table></div>${rows.length > 400 ? `<p class="hint">외 ${fmt(rows.length - 400)}건</p>` : ''}`;
-    h += `<div class="row"><button class="btn pri" data-act="diff-apply">${nCh ? `바뀐 ${fmt(nCh)}건` : ''}${nCh && df.added.length ? ' · ' : ''}${df.added.length ? `새 세대 ${fmt(df.added.length)}` : ''} 반영</button><span class="hint">반영한 내용은 변경 이력에 남고 바로 되돌릴 수 있습니다.</span></div>`;
+  if (rows.length || df.renames.length) {
+    if (rows.length) h += `<div class="scroll-x" data-scroll="diff" style="max-height:300px;overflow-y:auto;border:1px solid var(--line-2);border-radius:6px"><table class="grid"><thead><tr><th class="stick">세대</th><th>항목</th><th>지금</th><th>새 자료</th></tr></thead><tbody>${rows.slice(0, 400).map(r => `<tr><th class="stick mono">${esc(r[0])}</th><td style="text-align:left">${esc(r[1])}</td><td style="text-align:left;color:var(--ink-2)">${esc(r[2] || '—')}</td><td style="text-align:left;font-weight:600">${esc(r[3] || '—')}</td></tr>`).join('')}</tbody></table></div>${rows.length > 400 ? `<p class="hint">외 ${fmt(rows.length - 400)}건</p>` : ''}`;
+    else h += `<p class="muted">세대 값은 달라진 게 없고, 선택지 이름만 새 자료대로 바뀝니다.</p>`;
+    const what = [nCh ? `바뀐 ${fmt(nCh)}건` : '', df.added.length ? `새 세대 ${fmt(df.added.length)}` : '', df.renames.length ? `선택지 이름 ${fmt(df.renames.length)}개` : ''].filter(Boolean).join(' · ');
+    h += `<div class="row"><button class="btn pri" data-act="diff-apply">${what} 반영</button><span class="hint">반영한 내용은 변경 이력에 남고 바로 되돌릴 수 있습니다.</span></div>`;
   } else h += `<p class="muted">현재 단지와 달라진 내용이 없습니다.</p>`;
   return h + `</div>`;
 }
@@ -1974,6 +2284,8 @@ function applyDiff() {
     const m = meta(), resolve = {};
     const nextO = () => 'o' + (m.options.reduce((x, o) => Math.max(x, +String(o.id).replace(/\D/g, '') || 0), 0) + 1);
     const nextC = o => 'c' + (o.choices.reduce((x, c) => Math.max(x, +String(c.id).replace(/\D/g, '') || 0), 0) + 1);
+    // 이름만 바뀐 선택지: id(세대 값·시공 체크가 가리키는 것)는 두고 이름만 바꾼다
+    (df.renames || []).forEach(r => { const o = m.options.find(x => x.id === r.oid), c = o && o.choices.find(x => x.id === r.cid); if (!c || c.name === r.to) return; items.push(['', o.name + ' 선택지 이름', c.name, r.to]); c.name = r.to; nItems++; });
     res.options.forEach(no => {
       const mp = df.omap[no.id];
       if (mp.o) {
@@ -2039,16 +2351,24 @@ function commitImport() {
   const now = new Date().toISOString(); let list = res.units.map(u => Object.assign({}, u));
   if (imp.mask) list.forEach(u => { if (u.n) u.n = maskName(u.n); });
   if (imp.mode === 'replace' && S.pid && meta()) {
-    const oldW = new Map(units().list.filter(u => u.w).map(u => [ukey(u), u.w])), oldOpts = clone(meta().options || []);
+    const oldW = new Map(units().list.filter(u => u.w).map(u => [ukey(u), u.w])), oldS = new Map(units().list.map(u => [ukey(u), u.s || {}])), oldOpts = clone(meta().options || []);
     for (const cid of Object.keys(S.chunks)) { delete S.chunks[cid]; S.B.sync(chunkPath(S.pid, cid), null); }
-    S._carryW = {oldW, oldOpts};
+    S._carryW = {oldW, oldS, oldOpts};
     const m = meta(), keep = {}; (m.options || []).forEach(o => o.choices.forEach(c => { if (c.img) keep[nk(o.name) + '|' + nk(c.name)] = c.img; }));
     m.options = clone(res.options); m.options.forEach(o => o.choices.forEach(c => { const id = keep[nk(o.name) + '|' + nk(c.name)]; if (id) c.img = id; }));
     m.flags = clone(res.flags); m.source = imp.file; saveMeta();
     const cw = S._carryW; S._carryW = null;
     if (cw && cw.oldW.size) {
-      const om = {}; cw.oldOpts.forEach(o0 => { const n0 = m.options.find(o1 => nk(o1.name) === nk(o0.name)); if (n0) om[o0.id] = {id: n0.id, ch: Object.fromEntries(o0.choices.map(c0 => [c0.id, (n0.choices.find(c1 => nk(c1.name) === nk(c0.name)) || {}).id || '']))}; });
-      list.forEach(nu => { const w0 = cw.oldW.get(nu.d + '-' + nu.h); if (!w0) return; const w1 = {}; for (const [oid, w] of Object.entries(w0)) { const mm = om[oid]; if (!mm) continue; const x = clone(w); if (x.c) x.c = mm.ch[x.c] || ('?' + x.c); w1[mm.id] = x; } if (Object.keys(w1).length) nu.w = w1; });
+      // 같은 이름 옵션끼리 시공 체크를 옮긴다. 선택지는 이름으로, 이름이 바뀐 건 세대마다 맞춰 보고 같은 것으로 (앱이 읽는 방식이 바뀐 뒤 같은 파일로 교체해도 완료가 유지되게)
+      const om = {}, usedN = new Set();
+      cw.oldOpts.forEach(o0 => {
+        const n0 = matchByName(m.options.filter(o1 => !usedN.has(o1.id)), o0.name); if (!n0) return; usedN.add(n0.id);
+        const ch = {}; o0.choices.forEach(c0 => { const c1 = matchByName(n0.choices, c0.name); if (c1) ch[c0.id] = c1.id; });
+        const pairs = []; list.forEach(nu => { const a = (cw.oldS.get(nu.d + '-' + nu.h) || {})[o0.id], b = nu.s && nu.s[n0.id]; if (a != null && b != null) pairs.push([a, b]); });
+        relabelPairs(pairs, new Set(o0.choices.map(c => c.id).filter(id => !ch[id])), new Set(Object.values(ch))).forEach(([a, b]) => { ch[a] = b; });
+        om[o0.id] = {id: n0.id, ch, names: Object.fromEntries(o0.choices.map(c => [c.id, c.name]))};
+      });
+      list.forEach(nu => { const w0 = cw.oldW.get(nu.d + '-' + nu.h); if (!w0) return; const w1 = {}; for (const [oid, w] of Object.entries(w0)) { const mm = om[oid]; if (!mm) continue; const x = clone(w); if (x.c) { if (mm.ch[x.c]) x.c = mm.ch[x.c]; else { x.cn = mm.names[x.c] || ''; x.c = '?' + x.c; } } w1[mm.id] = x; } if (Object.keys(w1).length) nu.w = w1; });
     }
     S.undo = [];
   } else {
@@ -2394,7 +2714,7 @@ function impModeHTML(imp, res) {
   h += `<div class="steps" style="gap:8px;border-top:1px solid var(--line-2);padding-top:12px"><div class="label">어떻게 가져올까요?</div>
     ${canUpd ? `<label class="mrad"><input type="radio" name="impMode" id="impUpd" data-ch="imp-mode" value="update"${imp.mode === 'update' ? ' checked' : ''}><span><b>현재 단지(${esc(meta().name)})에 바뀐 내용만 반영</b><span class="hint">새로 받은 자료와 비교해서 달라진 세대만 고칩니다. 변경 이력에 남고 되돌릴 수 있습니다.</span></span></label>` : ''}
     <label class="mrad"><input type="radio" name="impMode" id="impNew" data-ch="imp-mode" value="new"${imp.mode === 'new' ? ' checked' : ''}><span><b>새 단지로 추가</b></span></label>
-    ${S.pid ? `<label class="mrad"><input type="radio" name="impMode" id="impRep" data-ch="imp-mode" value="replace"${imp.mode === 'replace' ? ' checked' : ''}><span><b>현재 단지를 ${imp.multi ? '합친 자료로' : '이 파일로'} 통째로 교체</b><span class="hint">옵션 구성과 세대가 모두 바뀌고 되돌릴 수 없습니다.</span></span></label>` : ''}
+    ${S.pid ? `<label class="mrad"><input type="radio" name="impMode" id="impRep" data-ch="imp-mode" value="replace"${imp.mode === 'replace' ? ' checked' : ''}><span><b>현재 단지를 ${imp.multi ? '합친 자료로' : '이 파일로'} 통째로 교체</b><span class="hint">옵션 구성과 세대가 모두 바뀌고 되돌릴 수 없습니다. 시공 체크는 같은 동·호의 같은 옵션끼리 옮겨집니다.</span></span></label>` : ''}
     ${canUpd && ovr >= 0.5 && omr < 0.5 && imp.mode !== 'update' ? `<p class="hint" style="margin:0">동·호는 현재 단지(${esc(meta().name)})와 겹치는데 옵션은 겹치지 않습니다. <b>같은 단지의 다른 옵션 파일(예: 2차 옵션)이면 ‘바뀐 내용만 반영’</b>을 고르세요. 그 옵션들이 현재 단지에 추가됩니다.</p>` : ''}</div>`;
   if (imp.mode === 'update') {
     const nm = namesMasked();
@@ -2421,6 +2741,7 @@ function vImportMulti(imp) {
   if (imp.busy) return h + `<p class="muted">${esc(imp.busy)}</p>`;
   if (!res) return h + `<p class="err">합칠 수 있는 파일이 없습니다. 각 파일의 ‘확인·수정’에서 열을 직접 지정하거나 다른 파일을 추가하세요.</p>`;
   const ov = M.overlap / Math.max(1, res.units.length);
+  if (imp.autoNote) h += `<p class="hint" style="margin:0">${esc(imp.autoNote)}</p>`;
   h += `<div><div class="label">합친 결과</div><p style="margin-top:2px"><b class="num">${fmt(res.units.length)}세대</b>, 옵션 <b class="num">${res.options.length}개</b>${res.flags.length ? `, 색상 표시 ${res.flags.length}종` : ''}</p>
     <p class="muted" style="font-size:13px">${M.overlap === 0 ? '파일끼리 겹치는 세대가 없어 세대를 이어 붙였습니다 (동·타입별로 나뉜 자료).' : ov > 0.5 && M.shared.length <= res.options.length / 2 ? `${fmt(M.overlap)}세대가 여러 파일에 있어, 세대마다 파일별 옵션을 모았습니다 (옵션별로 나뉜 자료).` : ov > 0.5 ? `${fmt(M.overlap)}세대가 같은 옵션으로 여러 파일에 겹쳐 있습니다. 겹친 칸은 아래쪽 파일 값을 썼습니다.` : `${fmt(M.overlap)}세대만 여러 파일에 겹칩니다. 겹친 세대는 하나로 합쳤습니다.`}${M.shared.length ? ` 이름이 같아 한 항목으로 묶은 옵션 ${M.shared.length}개${M.shared.length <= 6 ? `: ${esc(M.shared.join(', '))}` : ''}.` : ''}</p></div>`;
   if (nBad) h += `<p class="err">인식하지 못한 파일 ${nBad}개는 합친 결과에 들어가지 않았습니다.</p>`;
@@ -2453,7 +2774,7 @@ function vImport() {
   const imp = S.mg.imp;
   let h = `<section class="panel"><div class="panel-h"><h2>파일에서 가져오기</h2></div><div class="panel-b steps">`;
   if (!imp || imp.fatal) {
-    h += `<div class="drop" id="drop"><p><b>옵션 계약 내역 파일</b>을 여기에 끌어다 놓거나</p><p style="margin:10px 0"><label class="btn pri" for="impFile">파일 선택</label><input class="sr" type="file" id="impFile" multiple accept="${IMP_ACCEPT},.json"></p><p class="faint" style="font-size:12px">Excel(.xlsx) · CSV · PDF. 동·호 열과 옵션별 표시(1, O, ✓ 또는 선택값)가 있는 세대 목록이면 옵션 항목까지 자동으로 구성됩니다. <b>옵션이 여러 파일(1차·2차, 동별 등)로 나뉘어 있으면 한꺼번에 여러 개를 선택하세요.</b> 한 단지로 합칩니다. 이 사이트에서 저장한 백업(.json)도 여기로 복원합니다.</p></div>`;
+    h += `<div class="drop" id="drop"><p><b>옵션 계약 내역 파일</b>을 여기에 끌어다 놓거나</p><p style="margin:10px 0"><label class="btn pri" for="impFile">파일 선택</label><input class="sr" type="file" id="impFile" multiple accept="${IMP_ACCEPT},.json"></p><p class="faint" style="font-size:12px">Excel(.xlsx·.xls) · 웹 시스템에서 받은 엑셀 · CSV · PDF. 동·호 열과 옵션별 표시(1, O, ✓ 또는 선택값)가 있는 세대 목록이면 옵션 항목까지 자동으로 구성됩니다. <b>옵션이 여러 파일(1차·2차, 동별 등)로 나뉘어 있으면 한꺼번에 여러 개를 선택하세요.</b> 한 단지로 합칩니다. 이 사이트에서 저장한 백업(.json)도 여기로 복원합니다.</p></div>`;
     if (imp && imp.fatal) h += `<p class="err">${esc(imp.file)}: ${esc(imp.fatal)}</p>`;
     if (window.__demoFiles) h += demoRowHTML();
     return h + `</div></section>`;
@@ -2473,7 +2794,8 @@ function vManage() {
   h += `<div class="row">${S.mg.newProj ? `<label class="field" style="flex:1 1 180px">새 단지 이름<input id="npName" placeholder="예: ○○자이 2단지" maxlength="60"></label><button class="btn pri" data-act="proj-new-yes" style="align-self:flex-end">만들기</button><button class="btn" data-act="proj-new-no" style="align-self:flex-end">취소</button>` : `<button class="btn" data-act="proj-new">빈 단지 새로 만들기</button>`}
     ${m ? (S.mg.delProj ? `<span class="err">'${esc(m.name)}' 단지와 모든 세대·이력을 삭제할까요?</span><button class="btn danger" data-act="proj-del-yes">삭제</button><button class="btn" data-act="proj-del-no">취소</button>` : `<button class="btn danger" data-act="proj-del">이 단지 삭제</button>`) : ''}</div></div></section>`;
   if (m) {
-    if (S.downloads) h += `<section class="panel"><div class="panel-h"><h2>내보내기</h2></div><div class="panel-b steps"><div class="row"><button class="btn" data-act="x-all">전체 세대 목록 (엑셀)</button><button class="btn" data-act="x-elev">동별 배치도 (엑셀)</button><button class="btn" data-act="x-hist">변경 이력 (엑셀)</button><button class="btn" data-act="proj-export">백업 파일 (.json)</button></div><p class="hint">엑셀 파일은 그대로 인쇄하거나 보낼 수 있습니다. 배치도는 동마다 시트 한 장씩, A3 가로로 인쇄되게 맞춰 두었습니다. 백업 파일은 이 화면의 가져오기로 다시 복원합니다.</p></div></section>`;
+    if (S.downloads) h += `<section class="panel"><div class="panel-h"><h2>내보내기</h2></div><div class="panel-b steps"><div class="row"><button class="btn" data-act="x-all">전체 세대 목록 (엑셀)</button><button class="btn" data-act="x-elev">동별 배치도 (엑셀)</button><button class="btn" data-act="x-hist">변경 이력 (엑셀)</button>${trackedOpts().length ? `<button class="btn" data-act="x-work">시공 현황 (엑셀)</button>` : ''}<button class="btn" data-act="proj-export">백업 파일 (.json)</button></div><p class="hint">엑셀 파일은 그대로 인쇄하거나 보낼 수 있습니다. 배치도는 동마다 시트 한 장씩, A3 가로로 인쇄되게 맞춰 두었습니다. 백업 파일에는 세대·옵션 구성·시공 체크·현장 사진이 모두 들어가고(변경 이력은 빠짐), 이 화면의 가져오기로 다시 복원합니다.</p></div></section>`;
+    if (units().list.length) h += wtHTML();
     h += vLocalInfo();
     if (window.__desktop) h += `<section class="panel"><div class="panel-h"><h2>데이터 파일</h2><span class="hint">이 컴퓨터에 저장</span></div><div class="panel-b steps"><p style="word-break:break-all;font-size:13px"><b>${esc(window.__desktop.dir)}</b></p><p class="muted" style="font-size:13px">모든 단지·세대·변경 이력이 이 폴더의 data.json에 바로 저장됩니다. 프로그램을 켤 때마다 이전 상태를 backups 폴더에 하나씩 남깁니다(최근 20개).</p><div class="row"><button class="btn" data-act="dt-open">폴더 열기</button></div><p class="hint">다른 PC로 옮길 때는 위의 ‘백업 파일 (.json)’을 저장해서 그 PC의 가져오기로 복원하세요.</p></div></section>`;
     h += `<section class="panel"><div class="panel-h"><h2>세대 직접 추가</h2></div><div class="panel-b"><div class="row"><label class="field">동<input id="nuD" size="6" placeholder="101"></label><label class="field">호<input id="nuH" size="6" placeholder="1502"></label><label class="field">타입<input id="nuT" size="6" placeholder="84A" list="typeList"></label><label class="field">계약자<input id="nuN" size="10"></label><button class="btn pri" data-act="unit-add" style="align-self:flex-end">추가</button></div><datalist id="typeList">${types().map(t => `<option value="${esc(t)}">`).join('')}</datalist><p class="faint" style="font-size:12px;margin-top:8px">추가하면 세대별 화면에서 옵션을 바로 선택할 수 있습니다.</p></div></section>`;
@@ -2709,8 +3031,8 @@ function wStat(u, o) {
 }
 function wWhy(u, o) {
   const w = wGet(u, o.id), cur = sel(u, o);
-  if (w && w.s === 'd' && w.c !== cur) return `완료 당시 ${w.c ? chName(o, w.c) : '없음'} → 지금 ${cur ? chName(o, cur) : '해당 없음'}`;
-  if (w && w.s === 'r') return '재시공 필요로 표시함';
+  if (w && w.s === 'd' && w.c !== cur) return `완료 당시 ${w.c ? (chName(o, w.c) || w.cn || '지금 구성에 없는 선택') : '없음'} → 지금 ${cur ? chName(o, cur) : '해당 없음'}`;
+  if (w && w.s === 'r') return w.why || '재시공 필요로 표시함';
   return '';
 }
 const hNum = x => /^\d{3,4}$/.test(x.h) ? [Math.floor(+x.h / 100), +x.h % 100] : [0, 0];
@@ -2728,7 +3050,7 @@ function setWork(key, oid, s, patch) {
   return mutate(`${label} · ${key} ${shortName(o.name)}`, (touch, items) => {
     const u = units().map.get(key); if (!u) return false; touch(u._c);
     const w = Object.assign({}, wGet(u, oid) || {});
-    if (s !== undefined) { if (s) { w.s = s; w.c = sel(u, o); w.t = today(); } else { delete w.s; delete w.c; delete w.t; } }
+    if (s !== undefined) { delete w.why; delete w.cn; if (s) { w.s = s; w.c = sel(u, o); w.t = today(); } else { delete w.s; delete w.c; delete w.t; } }
     if (patch) Object.assign(w, patch);
     if (!w.m) delete w.m; if (!w.ph || !w.ph.length) delete w.ph;
     const all = Object.assign({}, u.w || {}); if (Object.keys(w).length) all[oid] = w; else delete all[oid];
@@ -2763,6 +3085,104 @@ function exportWork() {
     wList(U.slice().sort((a, b) => String(a.d).localeCompare(String(b.d), 'ko', {numeric: true}) || byFloor(a, b)), o).forEach(([u, st]) => { const w = wGet(u, o.id) || {}, cur = sel(u, o); det.push([{v: numOr(u.d), s: {h: 'center'}}, {v: numOr(u.h), s: {h: 'center'}}, {v: u.t || '', s: {h: 'center'}}, {v: o.name, s: {}}, {v: cur ? chName(o, cur) : '해당 없음', s: {}}, {v: W_TXT[st], s: {h: 'center', fill: st === 'done' ? GF : st === 'redo' ? RF : YF}}, {v: w.t || '', s: {h: 'center'}}, {v: wWhy(u, o), s: {}}, {v: w.m || '', s: {}}, {v: (w.ph || []).length || '', s: {h: 'center'}}]); });
   });
   saveBook('시공현황', [{name: '요약', rows: sum, cols: [34, 7, 8, 8, 8, 8, 9], freeze: {r: 1, c: 0}}, {name: '세대별', rows: det, cols: [7, 7, 8, 30, 22, 9, 11, 34, 30, 6], freeze: {r: 1, c: 2}, autoFilter: `A1:J${det.length}`}], '시공 현황 엑셀을 저장했습니다.');
+}
+/* 시공 체크 옮기기: 이 기기의 다른 단지나 백업 파일에 있는 시공 체크를 이 단지로.
+   단지를 새로 만들었을 때(앱 업데이트 뒤 파일을 처음부터 다시 넣은 경우 등)나 다른 사람이 체크한 것을 합칠 때 쓴다.
+   같은 동·호의 같은 옵션끼리 옮기고, 이 단지에 이미 있는 체크는 건드리지 않는다. */
+const wtKey = u => String(u.d) + '-' + String(u.h);
+function wtPlan(wt) {
+  const T = units(), tO = opts(), rows = [], todo = []; let noUnit = 0, kept = 0, nPh = 0;
+  (wt.meta.options || []).forEach(so => {
+    const has = wt.units.filter(u => u.w && u.w[so.id] && Object.keys(u.w[so.id]).length); if (!has.length) return;
+    const tid = so.id in wt.omap ? wt.omap[so.id] : ((matchByName(tO, so.name) || {}).id || ''), to = tO.find(o => o.id === tid), sc = so.choices || [];
+    const row = {so, to, n: has.length, ren: [], miss: 0}; rows.push(row); if (!to) return;
+    // 완료 당시 선택: 이름이 같은 선택지 → 이름이 다르면 세대마다 맞춰 보고 같은 것으로
+    const ch = new Map(); sc.forEach(c => { const mc = matchByName(to.choices, c.name); if (mc) ch.set(c.id, mc.id); });
+    const pairs = []; wt.units.forEach(su => { const tu = T.map.get(wtKey(su)), a = su.s && su.s[so.id], b = tu ? sel(tu, to) : null; if (a != null && b != null) pairs.push([a, b]); });
+    relabelPairs(pairs, new Set(sc.map(c => c.id).filter(id => !ch.has(id))), new Set(ch.values())).forEach(([a, b]) => { ch.set(a, b); row.ren.push([(sc.find(c => c.id === a) || {}).name || '', chName(to, b)]); });
+    has.forEach(su => {
+      const key = wtKey(su), tu = T.map.get(key), w = su.w[so.id];
+      if (!tu) { noUnit++; return; }
+      if (wGet(tu, to.id)) { kept++; return; }
+      const x = {}; if (w.t) x.t = w.t; if (w.m) x.m = w.m; if (w.ph && w.ph.length) { x.ph = w.ph.slice(); nPh += w.ph.length; }
+      if (w.s === 'd' || w.s === 'r') {
+        x.s = w.s; if (w.why) x.why = w.why;
+        if (w.c != null) { const mc = ch.get(w.c); if (mc) x.c = mc; else if (w.s === 'd') { x.s = 'r'; x.why = `옮겨 올 때 완료 당시 선택(${(sc.find(c => c.id === w.c) || {}).name || w.cn || '알 수 없음'})을 이 단지에서 찾지 못함`; row.miss++; } }
+        else if (w.s === 'd') x.c = null;
+      }
+      todo.push({key, oid: to.id, oname: to.name, w: x, st: x.s === 'r' ? 'redo' : x.s === 'd' ? (x.c === sel(tu, to) ? 'done' : 'redo') : 'memo'});
+    });
+  });
+  return {rows, todo, noUnit, kept, nPh};
+}
+function wtGetPlan(wt) { const k = S.pid + '|' + S.ver + '|' + JSON.stringify(wt.omap); if (!wt.plan || wt.planKey !== k) { wt.plan = wtPlan(wt); wt.planKey = k; } return wt.plan; }
+function wtHTML() {
+  const wt = S.mg.wt, others = Object.keys(S.projects).filter(id => id !== S.pid);
+  let h = `<section class="panel"><div class="panel-h"><h2>시공 체크 옮기기</h2><span class="hint">다른 단지나 백업 파일의 시공 체크를 이 단지로</span></div><div class="panel-b steps">`;
+  if (wt && wt.busy) h += `<p class="muted">${esc(wt.busy)}</p>`;
+  else if (wt) h += wtPlanHTML(wt);
+  else h += `<p class="hint" style="margin:0">단지를 새로 만들었을 때(예: 앱 업데이트 뒤 파일을 처음부터 다시 넣은 경우)나 다른 사람이 체크한 내용을 합칠 때 씁니다. 같은 동·호의 같은 옵션끼리 옮기고, 이 단지에 이미 있는 체크는 건드리지 않습니다.</p>
+    <div class="row">${others.length ? `<label class="field" style="flex:1 1 200px">이 기기의 다른 단지에서<select id="wtSrc" data-ch="wt-src"><option value="">단지 고르기</option>${others.map(id => `<option value="${esc(id)}">${esc(S.projects[id].name || '이름 없는 단지')}</option>`).join('')}</select></label>` : ''}<label class="btn" style="align-self:flex-end">백업 파일에서 (.json)<input class="sr" type="file" accept=".json,application/json" data-ch="wt-file"></label></div>`;
+  return h + `</div></section>`;
+}
+function wtPlanHTML(wt) {
+  const P = wtGetPlan(wt), tO = opts(), cnt = {done: 0, redo: 0, memo: 0}; P.todo.forEach(x => cnt[x.st]++);
+  let h = `<p style="margin:0"><b>${esc(wt.name)}</b>의 시공 체크</p>`;
+  if (!P.rows.length) return h + `<p class="muted">이 단지에는 시공 체크가 없습니다.</p><div class="row"><button class="btn" data-act="wt-cancel">닫기</button></div>`;
+  h += `<div class="scroll-x"><table class="grid"><thead><tr><th style="text-align:left">가져올 쪽 옵션</th><th>체크</th><th style="text-align:left">이 단지에서는</th></tr></thead><tbody>${P.rows.map(r => `<tr><td style="text-align:left">${esc(r.so.name)}</td><td class="num">${fmt(r.n)}</td><td style="text-align:left"><select data-ch="wt-map" data-o="${esc(r.so.id)}" aria-label="${esc(r.so.name)} 체크를 옮길 옵션"><option value="">옮기지 않음</option>${tO.map(o => `<option value="${esc(o.id)}"${r.to && r.to.id === o.id ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table></div>`;
+  const ren = P.rows.flatMap(r => r.ren.map(x => `${shortName(r.so.name)}: ${x[0]} → ${x[1]}`)), miss = P.rows.reduce((n, r) => n + r.miss, 0);
+  if (ren.length) h += `<p class="hint" style="margin:0">이름이 다른 선택지 ${fmt(ren.length)}개는 세대마다 맞춰 보고 같은 것으로 봤습니다: ${esc(ren.slice(0, 6).join(', '))}${ren.length > 6 ? ' 외' : ''}</p>`;
+  if (miss) h += `<p class="hint" style="margin:0">완료 당시 선택을 이 단지에서 찾지 못한 ${fmt(miss)}건은 ‘재시공 확인 필요’로 옮깁니다.</p>`;
+  h += `<p class="num" style="margin:0">옮길 체크 <b>${fmt(P.todo.length)}건</b> · 완료 ${fmt(cnt.done)} · 재시공 ${fmt(cnt.redo)}${cnt.memo ? ` · 메모·사진만 ${fmt(cnt.memo)}` : ''}${P.nPh ? ` · 현장 사진 ${fmt(P.nPh)}장` : ''}</p>`;
+  const skip = [P.kept ? `이 단지에 이미 체크가 있는 ${fmt(P.kept)}건은 그대로 둡니다` : '', P.noUnit ? `이 단지에 없는 세대의 ${fmt(P.noUnit)}건은 건너뜁니다` : ''].filter(Boolean);
+  if (skip.length) h += `<p class="hint" style="margin:0">${skip.join(' · ')}.</p>`;
+  return h + `<div class="row">${P.todo.length ? `<button class="btn pri" data-act="wt-apply">${fmt(P.todo.length)}건 옮기기</button>` : `<span class="muted">옮길 체크가 없습니다.</span>`}<button class="btn" data-act="wt-cancel">취소</button></div><p class="hint" style="margin:0">옮긴 내용은 변경 이력에 남고 되돌릴 수 있습니다.</p>`;
+}
+function wtLoadProject(pid) {
+  const m = S.projects[pid]; if (!m) return;
+  S.mg.wt = {busy: `‘${m.name || '단지'}’ 세대를 읽는 중…`}; render();
+  S.B.readUnits(pid).then(list => { S.mg.wt = {name: m.name || '다른 단지', meta: clone(m), units: list, omap: {}}; render(); }, () => { S.mg.wt = null; toast('그 단지의 세대를 읽지 못했습니다. 다시 시도해 주세요.'); render(); });
+}
+async function wtLoadFile(f) {
+  let j; try { j = JSON.parse(await f.text()); } catch (e) { toast('백업 파일을 읽지 못했습니다.'); return; }
+  const list = (j && j.format === 'apt-options-bundle' && Array.isArray(j.projects) ? j.projects : [j]).filter(x => x && x.format === 'apt-options-backup' && x.meta && Array.isArray(x.units));
+  if (!list.length) { toast('이 사이트에서 저장한 백업 파일이 아닙니다.'); return; }
+  const mine = units().map, score = x => x.units.filter(u => u && mine.has(wtKey(u))).length;   // 모든 단지 백업이면 이 단지와 세대가 가장 많이 겹치는 단지
+  const b = list.reduce((p, x) => score(x) > score(p) ? x : p, list[0]);
+  S.mg.wt = {name: `${b.meta.name || '백업'} (백업 파일)`, meta: b.meta, units: b.units.filter(u => u && u.d != null && u.h != null), images: b.images || null, omap: {}};
+  render();
+}
+// 사진은 새 id로 복사해 이 단지 것으로 저장 (원래 단지를 지워도 남게)
+async function wtCopyPhotos(wt, todo) {
+  const st = imgStore(), map = new Map(); if (!st) return map;
+  for (const id of [...new Set(todo.flatMap(x => x.w.ph || []))]) {
+    try {
+      let rec = null; const r = wt.images && wt.images[id];
+      if (r && r.data) { const buf = await (await fetch(r.data)).arrayBuffer(), tbuf = r.thumb ? await (await fetch(r.thumb)).arrayBuffer() : buf; rec = {type: r.type || 'image/jpeg', buf, tbuf, w: r.w, h: r.h}; }
+      else { const o = await st.get(id); if (o) rec = {type: o.type, buf: o.buf, tbuf: o.tbuf, w: o.w, h: o.h}; }
+      if (!rec) continue;
+      const nid = newId('img'); await st.put(Object.assign(rec, {id: nid, kind: 'w', pid: S.pid, at: new Date().toISOString()})); map.set(id, nid);
+    } catch (e) {}
+  }
+  return map;
+}
+async function wtApply() {
+  const wt = S.mg.wt; if (!wt || wt.busy) return;
+  const P = wtGetPlan(wt); if (!P.todo.length) return;
+  wt.busy = '옮기는 중…'; render();
+  const phMap = await wtCopyPhotos(wt, P.todo); let n = 0, lost = 0;
+  const ok = mutate(`시공 체크 옮기기 · ${wt.name}`, (touch, items) => {
+    P.todo.forEach(x => {
+      const u = units().map.get(x.key); if (!u || wGet(u, x.oid)) return;
+      const w = clone(x.w); if (w.ph) { const ph = w.ph.map(id => phMap.get(id)).filter(Boolean); lost += w.ph.length - ph.length; if (ph.length) w.ph = ph; else delete w.ph; }
+      touch(u._c); u.w = Object.assign({}, u.w || {}, {[x.oid]: w}); n++;
+      items.push([x.key, x.oname, '', (x.st === 'done' ? '완료' : x.st === 'redo' ? '재시공' : '메모·사진') + ' (옮겨 옴)']);
+    });
+    if (!n) return false;
+  }, {src: 'work'});
+  S.mg.wt = null;
+  if (ok) { toast(`시공 체크 ${fmt(n)}건을 옮겼습니다.${lost ? ` 사진 ${fmt(lost)}장은 옮기지 못했습니다.` : ''}`, true); refreshImgUsage(); } else toast('옮길 체크가 없습니다.');
+  render();
 }
 function wSheetHTML() {
   const ws = S.ws; if (!ws) return '';
@@ -2955,6 +3375,8 @@ document.addEventListener('click', e => {
     case 'uv-wc': S.uv.wc = v || ''; break;
     case 'w-goto': S.uv.mode = 'work'; lsSet('aptopt-uvmode', 'work'); S.uv.wo = t.dataset.o; S.uv.wc = ''; location.hash = '#units'; return;
     case 'x-work': exportWork(); return;
+    case 'wt-apply': wtApply(); return;
+    case 'wt-cancel': S.mg.wt = null; break;
     case 'w-share': { const o = opts().find(x => x.id === S.uv.wo), us = units().list.filter(x => x.d === S.uv.dong); if (!o) return; shareText(`${dLabel(S.uv.dong)} ${shortName(o.name)} 작업 목록`, wShareText(us, o, S.uv.wc, v === 'left')); return; }
     case 'w-floor': {
       const o = opts().find(x => x.id === S.uv.wo); if (!o) return;
@@ -3052,6 +3474,10 @@ document.addEventListener('change', e => {
     case 'bk-v': S.cmp.bk.v = t.value; S.cmp.bk.confirm = false; break;
     case 'hist-q': S.hv.q = norm(t.value); break;
     case 'diff-newopts': S.mg.imp.addOpts = t.checked; break;
+    case 'diff-ren': S.mg.imp.noRen = !t.checked; break;
+    case 'wt-src': if (t.value) wtLoadProject(t.value); return;
+    case 'wt-file': { const f = t.files && t.files[0]; t.value = ''; if (f) wtLoadFile(f); return; }
+    case 'wt-map': { const wt = S.mg.wt; if (!wt) return; wt.omap[t.dataset.o] = t.value; break; }
     case 'nf-name': S.mg.nfName = t.value; return;
     case 'imp-sheet': { const top = S.mg.imp, imp = impNow(), sh = imp.sheets[+t.value]; imp.si = +t.value; imp.err = ''; imp.shSel = null; if (sh._auto) { imp.res = sh._auto.r; imp.via = 'auto'; imp.mm = mmFrom(sh._auto.m); } else { imp.res = null; imp.mm = mmFrom(null); imp.mmOpen = true; imp.err = '이 시트에서는 세대 목록을 자동으로 찾지 못했습니다. ‘열 직접 지정’을 사용해 주세요.'; } if (top.multi) remerge(top); break; }
     case 'imp-mode': S.mg.imp.mode = t.value; S.mg.imp.modeSet = true; break;
